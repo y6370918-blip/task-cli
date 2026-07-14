@@ -1,6 +1,7 @@
 
 def main() -> None:
-    print("Task CLI started")
+    app_name="Task CLI"
+    print(f"{app_name} started")
 
 
 if __name__ == "__main__":
