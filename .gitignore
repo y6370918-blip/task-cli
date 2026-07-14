@@ -1,0 +1,27 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Test and lint cache
+.pytest_cache/
+.ruff_cache/
+
+# Environment variables
+.env
+
+# Database files
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+#Editdor settings
+.vscode/
+.idea/
+.cursor/
+
+# Operating system files
+.DS_Store
+Thumbs.db
