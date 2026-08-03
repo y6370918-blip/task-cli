@@ -1,7 +1,12 @@
+import logging
+from task_cli.logger import configure_logging
+
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
-    app_name="Task CLI"
-    print(f"{app_name} started")
+    configure_logging()
+    logger.info("Task CLI started")
 
 
 if __name__ == "__main__":

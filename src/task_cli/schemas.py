@@ -9,8 +9,8 @@ TaskStatus = Literal[
     "done",
 ]
 
-class TaskCreate(BaseModel):
 
+class TaskCreate(BaseModel):
     title: str = Field(
         min_length=1,
         max_length=100,
@@ -20,6 +20,7 @@ class TaskCreate(BaseModel):
         default=None,
         max_length=500,
     )
+
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(
@@ -32,8 +33,8 @@ class TaskUpdate(BaseModel):
 
     status: TaskStatus | None = None
 
-class TaskRead(BaseModel):
 
+class TaskRead(BaseModel):
     id: int
     title: str
     description: str | None
