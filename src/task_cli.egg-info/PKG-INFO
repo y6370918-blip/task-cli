@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: task-cli
+Version: 0.1.0
+Summary: A simple task management CLI application
+Requires-Python: >=3.12
+Requires-Dist: pydantic
+Requires-Dist: python-dotenv
+Requires-Dist: sqlalchemy

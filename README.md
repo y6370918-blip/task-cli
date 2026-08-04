@@ -1,42 +1,51 @@
 # Task CLI
 
-A command-line task management application built with Python.
+一个基于 Python 的命令行任务管理工具。
 
-## Current status
+## Features
 
-Day 1 project setup completed.
+- 创建任务
+- 查看任务
+- 更新任务状态
+- 删除任务
+- SQLite 数据持久化
+- Pydantic 数据校验
+- SQLAlchemy ORM
+- 自动化测试
 
-## Planned features
-
-- Create tasks
-- List tasks
-- Update task status
-- Delete tasks
-- Filter tasks by status
-- Store tasks in SQLite
-- Validate input with Pydantic
-- Test services with pytest
-
-## Requirements
+## Tech Stack
 
 - Python 3.12
+- Pydantic
+- SQLAlchemy
+- SQLite
+- pytest
 
-## Setup
+## Installation
 
-Create a virtual environment:
+创建虚拟环境：
 
-```powershell
+```bash
 python -m venv .venv
-
-Activate it:
-.venv\Scripts\Activate.ps1
-Install dependencies:
-python -m pip install -r requirements.txt
+安装依赖：
+pip install -e .
 Run
-python src/task_cli/main.py
+task
+或者：
+python -m task_cli.main
 Test
-Testing will be added later.
-
+pytest
+Project Structure
+src/
+└── task_cli/
+    ├── main.py
+    ├── cli.py
+    ├── services.py
+    ├── models.py
+    ├── schemas.py
+    ├── database.py
+    ├── config.py
+    └── logger.py
 
 ---
 ```

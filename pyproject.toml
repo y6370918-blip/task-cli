@@ -1,8 +1,29 @@
+[build-system]
+requires = [
+    "setuptools>=61"
+]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "task-cli"
 version = "0.1.0"
-description = "A command-line task management application"
+description = "A simple task management CLI application"
+
 requires-python = ">=3.12"
+
+dependencies = [
+    "pydantic",
+    "python-dotenv",
+    "sqlalchemy",
+]
+
+[project.scripts]
+task = "task_cli.main:main"
+
+[tool.setuptools.packages.find]
+where = [
+    "src"
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
