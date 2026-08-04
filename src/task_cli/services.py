@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from task_cli.models import Task
 from task_cli.schemas import (
     TaskCreate,
@@ -47,7 +48,7 @@ def list_tasks(
     return list(result)
 
 
-def updata_task(
+def update_task(
     session: Session,
     task_id: int,
     data: TaskUpdate,

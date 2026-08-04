@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from task_cli.schemas import TaskCreate, TaskUpdate, TaskRead
+
+from task_cli.schemas import TaskCreate, TaskUpdate
 
 
 def test_create_task_success():

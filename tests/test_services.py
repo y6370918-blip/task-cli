@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-
 from task_cli.models import Base
 from task_cli.schemas import TaskCreate
 from task_cli.services import create_task, list_tasks

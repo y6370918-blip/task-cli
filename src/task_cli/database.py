@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from task_cli.config import get_settings
 from task_cli.models import Base
 
-
 settings = get_settings()
 
 
