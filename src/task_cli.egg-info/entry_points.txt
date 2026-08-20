@@ -1,2 +1,0 @@
-[console_scripts]
-task = task_cli.main:main

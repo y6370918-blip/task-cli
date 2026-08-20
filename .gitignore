@@ -25,3 +25,6 @@ data/*.sqlite3
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Python package metadata
+*.egg-info/

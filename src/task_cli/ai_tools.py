@@ -1,0 +1,391 @@
+import json
+from typing import Any
+
+from pydantic import ValidationError
+from sqlalchemy.orm import Session
+
+from task_cli.action_service import create_pending_action
+from task_cli.ai_exceptions import AIToolError
+from task_cli.exceptions import TaskNotFoundError
+from task_cli.schemas import (
+    TaskCreate,
+    TaskUpdate,
+)
+from task_cli.schemas_ai import (
+    ListTasksToolArguments,
+    RequestDeleteTaskToolArguments,
+)
+from task_cli.services import create_task, get_task, list_tasks, update_task
+
+# =========================================================
+# DeepSeek 可以使用的工具定义
+# =========================================================
+
+TOOLS = [
+    # -----------------------------------------------------
+    # 1. 查询任务
+    # -----------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks",
+            "description": (
+                "查询当前登录用户自己的任务。"
+                "当用户询问自己的任务、待办事项、"
+                "任务状态，或者要求总结任务时使用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "pending",
+                            "doing",
+                            "done",
+                        ],
+                        "description": (
+                            "可选的任务状态过滤条件。"
+                            "pending 表示待处理，"
+                            "doing 表示进行中，"
+                            "done 表示已完成。"
+                        ),
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    # -----------------------------------------------------
+    # 2. 创建任务
+    # -----------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task",
+            "description": (
+                "为当前登录用户创建一个新的任务。"
+                "任务会自动属于当前登录用户，"
+                "不需要也不能提供 owner_id。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "任务标题。",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "任务的详细描述，可选。",
+                    },
+                },
+                "required": [
+                    "title",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # -----------------------------------------------------
+    # 3. 修改任务
+    # -----------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task",
+            "description": (
+                "修改当前登录用户自己的任务。"
+                "可以修改标题、描述或者任务状态。"
+                "不能修改其他用户的任务。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "integer",
+                        "description": "需要修改的任务 ID。",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "新的任务标题。",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "新的任务描述。",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "pending",
+                            "doing",
+                            "done",
+                        ],
+                        "description": ("新的任务状态：pending、doing 或 done。"),
+                    },
+                },
+                "required": [
+                    "task_id",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    # -----------------------------------------------------
+    # 4. 请求删除任务
+    # -----------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "request_delete_task",
+            "description": (
+                "请求删除当前用户的某个任务。"
+                "这是危险操作，此工具不会真正删除任务，"
+                "只会要求用户进一步确认。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "integer",
+                        "description": "准备删除的任务 ID。",
+                    },
+                },
+                "required": [
+                    "task_id",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+
+# =========================================================
+# Tool 执行器
+# =========================================================
+
+
+def execute_tool(
+    name: str,
+    arguments: dict[str, Any],
+    db: Session,
+    owner_id: int,
+) -> str:
+    """
+    执行 DeepSeek 请求调用的工具。
+
+    name:
+        DeepSeek 想调用的工具名称。
+
+    arguments:
+        DeepSeek 为工具生成的参数。
+
+    db:
+        SQLAlchemy Session。
+
+    owner_id:
+        当前登录用户的 ID。
+        这个值必须来自 JWT / current_user，
+        不能由 DeepSeek 自己决定。
+    """
+
+    try:
+        # =================================================
+        # list_tasks
+        # =================================================
+
+        if name == "list_tasks":
+            data = ListTasksToolArguments.model_validate(arguments)
+
+            tasks = list_tasks(
+                db,
+                owner_id,
+                data.status,
+            )
+
+            result = {
+                "success": True,
+                "action": "list_tasks",
+                "count": len(tasks),
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "description": task.description,
+                        "status": task.status,
+                    }
+                    for task in tasks
+                ],
+                "message": (
+                    "任务查询成功。"
+                    "请根据这些真实数据回答用户，"
+                    "不需要为了确认结果再次调用 list_tasks。"
+                ),
+            }
+
+            return json.dumps(
+                result,
+                ensure_ascii=False,
+            )
+
+        # =================================================
+        # create_task
+        # =================================================
+
+        if name == "create_task":
+            data = TaskCreate(
+                title=arguments["title"],
+                description=arguments.get("description"),
+            )
+
+            task = create_task(
+                db,
+                data,
+                owner_id,
+            )
+
+            result = {
+                "success": True,
+                "action": "create_task",
+                "task": {
+                    "id": task.id,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                },
+                "message": (
+                    "任务创建成功。"
+                    "可以直接把创建结果告诉用户，"
+                    "不要重复调用 create_task。"
+                ),
+            }
+
+            return json.dumps(
+                result,
+                ensure_ascii=False,
+            )
+
+        # =================================================
+        # update_task
+        # =================================================
+
+        if name == "update_task":
+            task_id = arguments["task_id"]
+
+            # task_id 是工具自身的定位参数，
+            # 不属于 TaskUpdate 的字段，
+            # 所以这里把它排除。
+            update_fields = {
+                key: value for key, value in arguments.items() if key != "task_id"
+            }
+
+            # 防止模型只传 task_id，
+            # 却没有任何真正需要修改的字段。
+            if not update_fields:
+                raise AIToolError("没有提供需要修改的任务字段。")
+
+            data = TaskUpdate(**update_fields)
+
+            task = update_task(
+                db,
+                task_id,
+                data,
+                owner_id,
+            )
+
+            result = {
+                "success": True,
+                "action": "update_task",
+                "task": {
+                    "id": task.id,
+                    "title": task.title,
+                    "description": task.description,
+                    "status": task.status,
+                },
+                "message": (
+                    "任务修改成功。"
+                    "请直接把修改结果告诉用户，"
+                    "不要再次调用相同的 update_task。"
+                ),
+            }
+
+            return json.dumps(
+                result,
+                ensure_ascii=False,
+            )
+
+        # =================================================
+        # request_delete_task
+        # =================================================
+
+        if name == "request_delete_task":
+            data = RequestDeleteTaskToolArguments.model_validate(arguments)
+
+            task_id = data.task_id
+
+            get_task(
+                session=db,
+                task_id=task_id,
+                owner_id=owner_id,
+            )
+
+            pending_action = create_pending_action(
+                session=db,
+                owner_id=owner_id,
+                action="delete_task",
+                payload={
+                    "task_id": task_id,
+                },
+            )
+
+            result = {
+                "success": True,
+                "requires_confirmation": True,
+                "action": "delete_task",
+                "confirmation_id": (pending_action.id),
+                "task_id": task_id,
+                "expires_at": (pending_action.expires_at.isoformat()),
+                "message": (
+                    f"删除任务 {task_id} "
+                    f"需要用户确认。"
+                    f"确认操作编号为 "
+                    f"{pending_action.id}。"
+                ),
+            }
+
+            return json.dumps(
+                result,
+                ensure_ascii=False,
+            )
+
+        # =================================================
+        # 未知 Tool
+        # =================================================
+
+        raise AIToolError(f"不支持的 AI 工具: {name}")
+
+    # =====================================================
+    # Pydantic 参数验证失败
+    # =====================================================
+
+    except ValidationError as exc:
+        raise AIToolError(f"工具参数验证失败: {exc}") from exc
+
+    # =====================================================
+    # Task 不存在
+    #
+    # 这里也同时承担一个安全作用：
+    # 如果 task_id 存在，但不属于当前 owner_id，
+    # Service 应该同样表现为“找不到任务”。
+    # =====================================================
+
+    except TaskNotFoundError as exc:
+        raise AIToolError(f"任务不存在，或者当前用户无权访问该任务: {exc}") from exc
+
+    # =====================================================
+    # 参数自身有问题
+    # =====================================================
+
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AIToolError(f"工具参数错误: {exc}") from exc

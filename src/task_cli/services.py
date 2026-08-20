@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.functions import current_user
 
 from task_cli.models import Task
 from task_cli.schemas import (
@@ -7,39 +8,60 @@ from task_cli.schemas import (
     TaskStatus,
     TaskUpdate,
 )
-
+from task_cli.exceptions import TaskNotFoundError
 
 def create_task(
     session: Session,
     data: TaskCreate,
+    owner_id: int,
 ) -> Task:
 
     task = Task(
         title=data.title,
         description=data.description,
         status="pending",
+        owner_id=owner_id,
     )
 
     session.add(task)
     session.commit()
     session.refresh(task)
+
     return task
 
 
 def get_task(
     session: Session,
     task_id: int,
-) -> Task | None:
+    owner_id: int,
+) -> Task:
 
-    return session.get(Task, task_id)
+    statement = select(Task).where(
+        Task.id == task_id,
+        Task.owner_id == owner_id,
+    )
 
+    task = session.scalar(
+        statement
+    )
+
+    if task is None:
+        raise TaskNotFoundError(
+            task_id
+        )
+
+    return task
 
 def list_tasks(
     session: Session,
+    owner_id: int,
     status: TaskStatus | None = None,
 ) -> list[Task]:
 
-    statement = select(Task)
+    statement = select(Task).where(
+        Task.owner_id==owner_id
+    )
+
     if status:
         statement = statement.where(Task.status == status)
 
@@ -52,24 +74,31 @@ def update_task(
     session: Session,
     task_id: int,
     data: TaskUpdate,
-) -> Task | None:
+    owner_id: int,
+) -> Task:
 
-    task = session.get(Task, task_id)
+    statement = select(Task).where(
+        Task.id == task_id,
+        Task.owner_id == owner_id,
+    )
+
+    task = session.scalar(statement)
 
     if task is None:
-        return None
+        raise TaskNotFoundError(task_id)
 
-    if data.title is not None:
-        task.title = data.title
+    update_data = data.model_dump(
+        exclude_unset=True
+    )
 
-    if data.description is not None:
-        task.description = data.description
-
-    if data.status is not None:
-        task.status = data.status
+    for field, value in update_data.items():
+        setattr(
+            task,
+            field,
+            value,
+        )
 
     session.commit()
-
     session.refresh(task)
 
     return task
@@ -78,15 +107,22 @@ def update_task(
 def delete_task(
     session: Session,
     task_id: int,
+    owner_id: int,
 ) -> bool:
 
-    task = session.get(Task, task_id)
+    statement = select(Task).where(
+        Task.id == task_id,
+        Task.owner_id == owner_id,
+    )
+
+    task = session.scalar(
+        statement
+    )
 
     if task is None:
         return False
 
     session.delete(task)
-
     session.commit()
 
     return True

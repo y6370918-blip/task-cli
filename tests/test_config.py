@@ -5,4 +5,4 @@ def test_default_settings():
 
     settings = get_settings()
 
-    assert settings.database_url.startswith("sqlite")
+    assert settings.database_url

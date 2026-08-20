@@ -47,5 +47,23 @@ src/
     ├── config.py
     └── logger.py
 
+
+## Run with Docker
+
+
+Build:
+
+docker build -t task-api .
+
+
+Run:
+
+docker run -p 8000:8000 task-api
+
+
+Open:
+
+http://127.0.0.1:8000/docs
+
 ---
 ```

@@ -1,20 +1,23 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from task_cli.models import Base, Task
+from task_cli.models import Base, Task,User
 
 
-def test_create_task():
+def test_create_task(
+    db_session: Session,
+    user: User,
+):
+    task = Task(
+        title="Test Task",
+        description="Test Description",
+        status="pending",
+        owner_id=user.id,
+    )
 
-    engine = create_engine("sqlite:///:memory:")
+    db_session.add(task)
+    db_session.commit()
+    db_session.refresh(task)
 
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as session:
-        task = Task(title="测试数据库")
-
-        session.add(task)
-
-        session.commit()
-
-        assert task.id == 1
+    assert task.id is not None
+    assert task.owner_id == user.id
