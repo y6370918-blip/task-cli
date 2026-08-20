@@ -1,37 +1,66 @@
-from datetime import datetime,timedelta,timezone
+from datetime import (
+    UTC,
+    datetime,
+    timedelta,
+)
+from typing import Any
+
 from jose import jwt
 
-SECRET_KEY="your-secret-key"
-ALGORITHM = "HS256"
+from task_cli.config import (
+    Settings,
+    get_settings,
+)
 
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+def _require_jwt_secret_key(
+    settings: Settings,
+) -> str:
+    secret_key = settings.jwt_secret_key
+
+    if secret_key is None:
+        raise RuntimeError("未配置 JWT_SECRET_KEY")
+
+    return secret_key
+
 
 def create_access_token(
-    data: dict
-):
+    data: dict[str, Any],
+) -> str:
+    settings = get_settings()
+
+    secret_key = _require_jwt_secret_key(settings)
 
     to_encode = data.copy()
 
-
-    expire = datetime.now(
-        timezone.utc
-    ) + timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    expire = datetime.now(UTC) + timedelta(
+        minutes=(settings.access_token_expire_minutes)
     )
-
 
     to_encode.update(
         {
-            "exp": expire
+            "exp": expire,
         }
     )
 
-
-    encoded_jwt = jwt.encode(
+    return jwt.encode(
         to_encode,
-        SECRET_KEY,
-        algorithm=ALGORITHM,
+        secret_key,
+        algorithm=settings.jwt_algorithm,
     )
 
 
-    return encoded_jwt
+def decode_access_token(
+    token: str,
+) -> dict[str, Any]:
+    settings = get_settings()
+
+    secret_key = _require_jwt_secret_key(settings)
+
+    return jwt.decode(
+        token,
+        secret_key,
+        algorithms=[
+            settings.jwt_algorithm,
+        ],
+    )
