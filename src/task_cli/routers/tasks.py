@@ -1,7 +1,6 @@
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     status,
 )
 from sqlalchemy.orm import Session
@@ -10,7 +9,6 @@ from task_cli.auth_dependencies import (
     get_current_user,
 )
 from task_cli.dependencies import get_db
-from task_cli.exceptions import TaskNotFoundError
 from task_cli.models import User
 from task_cli.schemas import (
     TaskCreate,
@@ -25,7 +23,6 @@ from task_cli.services import (
     update_task,
 )
 
-
 router = APIRouter(
     prefix="/tasks",
     tags=["tasks"],
@@ -36,6 +33,7 @@ router = APIRouter(
 # 创建任务
 # =========================================================
 
+
 @router.post(
     "/",
     response_model=TaskRead,
@@ -44,9 +42,7 @@ router = APIRouter(
 def create_task_api(
     data: TaskCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     return create_task(
         db,
@@ -59,15 +55,14 @@ def create_task_api(
 # 查询当前用户的所有任务
 # =========================================================
 
+
 @router.get(
     "/",
     response_model=list[TaskRead],
 )
 def list_tasks_api(
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     return list_tasks(
         db,
@@ -79,6 +74,7 @@ def list_tasks_api(
 # 查询当前用户的某一个任务
 # =========================================================
 
+
 @router.get(
     "/{task_id}",
     response_model=TaskRead,
@@ -86,35 +82,19 @@ def list_tasks_api(
 def get_task_api(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ):
-    try:
-        task = get_task(
-            db,
-            task_id,
-            current_user.id,
-        )
-
-    except TaskNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    return task
+    return get_task(
+        db,
+        task_id,
+        current_user.id,
+    )
 
 
 # =========================================================
 # 更新当前用户的任务
 # =========================================================
+
 
 @router.put(
     "/{task_id}",
@@ -124,36 +104,20 @@ def update_task_api(
     task_id: int,
     data: TaskUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ):
-    try:
-        task = update_task(
-            db,
-            task_id,
-            data,
-            current_user.id,
-        )
-
-    except TaskNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    return task
+    return update_task(
+        db,
+        task_id,
+        data,
+        current_user.id,
+    )
 
 
 # =========================================================
 # 删除当前用户的任务
 # =========================================================
+
 
 @router.delete(
     "/{task_id}",
@@ -161,29 +125,12 @@ def update_task_api(
 def delete_task_api(
     task_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ):
-    try:
-        result = delete_task(
-            db,
-            task_id,
-            current_user.id,
-        )
+    delete_task(
+        db,
+        task_id,
+        current_user.id,
+    )
 
-    except TaskNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    if result is False:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    return {
-        "message": "Task deleted"
-    }
+    return {"message": "Task deleted"}

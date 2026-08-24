@@ -1,14 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.sql.functions import current_user
 
+from task_cli.exceptions import TaskNotFoundError
 from task_cli.models import Task
 from task_cli.schemas import (
     TaskCreate,
     TaskStatus,
     TaskUpdate,
 )
-from task_cli.exceptions import TaskNotFoundError
+
 
 def create_task(
     session: Session,
@@ -41,16 +41,13 @@ def get_task(
         Task.owner_id == owner_id,
     )
 
-    task = session.scalar(
-        statement
-    )
+    task = session.scalar(statement)
 
     if task is None:
-        raise TaskNotFoundError(
-            task_id
-        )
+        raise TaskNotFoundError(task_id)
 
     return task
+
 
 def list_tasks(
     session: Session,
@@ -58,9 +55,7 @@ def list_tasks(
     status: TaskStatus | None = None,
 ) -> list[Task]:
 
-    statement = select(Task).where(
-        Task.owner_id==owner_id
-    )
+    statement = select(Task).where(Task.owner_id == owner_id)
 
     if status:
         statement = statement.where(Task.status == status)
@@ -87,9 +82,7 @@ def update_task(
     if task is None:
         raise TaskNotFoundError(task_id)
 
-    update_data = data.model_dump(
-        exclude_unset=True
-    )
+    update_data = data.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
         setattr(
@@ -108,21 +101,16 @@ def delete_task(
     session: Session,
     task_id: int,
     owner_id: int,
-) -> bool:
-
+) -> None:
     statement = select(Task).where(
         Task.id == task_id,
         Task.owner_id == owner_id,
     )
 
-    task = session.scalar(
-        statement
-    )
+    task = session.scalar(statement)
 
     if task is None:
-        return False
+        raise TaskNotFoundError(task_id)
 
     session.delete(task)
     session.commit()
-
-    return True
