@@ -1,27 +1,23 @@
-
-from task_cli.dependencies import get_db
-from pydantic import BaseModel, EmailStr
-
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    username: str
-
+    username: str = Field(
+        min_length=3,
+        max_length=50,
+    )
     email: EmailStr
-
-    password: str
-
+    password: str = Field(
+        min_length=8,
+        max_length=72,
+    )
 
 
 class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
-
     username: str
-
     email: EmailStr
-
-class UserLogin(BaseModel):
-    username: str
-    password: str

@@ -1,21 +1,51 @@
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from task_cli.exceptions import UserAlreadyExistsError
 from task_cli.models import User
+from task_cli.schemas_user import UserCreate
 from task_cli.security import hash_password
 
 
-def get_user_by_username(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+def get_user_by_username(
+    session: Session,
+    username: str,
+) -> User | None:
+    statement = select(User).where(User.username == username)
+
+    return session.scalar(statement)
 
 
-def create_user(db: Session, username: str, email: str, password: str):
+def create_user(
+    session: Session,
+    data: UserCreate,
+) -> User:
+    statement = select(User).where(
+        or_(
+            User.username == data.username,
+            User.email == str(data.email),
+        )
+    )
 
-    user = User(username=username, email=email, password_hash=hash_password(password))
+    existing_user = session.scalar(statement)
 
-    db.add(user)
+    if existing_user is not None:
+        raise UserAlreadyExistsError
 
-    db.commit()
+    user = User(
+        username=data.username,
+        email=str(data.email),
+        password_hash=hash_password(data.password),
+    )
 
-    db.refresh(user)
+    try:
+        session.add(user)
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise UserAlreadyExistsError from exc
+
+    session.refresh(user)
 
     return user
