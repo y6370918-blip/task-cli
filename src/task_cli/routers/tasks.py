@@ -1,6 +1,9 @@
+from typing import Annotated
+
 from fastapi import (
     APIRouter,
     Depends,
+    Query,
     status,
 )
 from sqlalchemy.orm import Session
@@ -13,6 +16,7 @@ from task_cli.models import User
 from task_cli.schemas import (
     TaskCreate,
     TaskRead,
+    TaskStatus,
     TaskUpdate,
 )
 from task_cli.services import (
@@ -61,12 +65,30 @@ def create_task_api(
     response_model=list[TaskRead],
 )
 def list_tasks_api(
+    task_status: Annotated[
+        TaskStatus | None,
+        Query(alias="status"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=100,
+        ),
+    ] = 20,
+    offset: Annotated[
+        int,
+        Query(ge=0),
+    ] = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return list_tasks(
         db,
-        current_user.id,
+        owner_id=current_user.id,
+        status=task_status,
+        limit=limit,
+        offset=offset,
     )
 
 

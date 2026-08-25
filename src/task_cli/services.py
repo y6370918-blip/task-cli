@@ -53,12 +53,18 @@ def list_tasks(
     session: Session,
     owner_id: int,
     status: TaskStatus | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Task]:
+    statement = select(Task).where(Task.owner_id == owner_id).order_by(Task.id)
 
-    statement = select(Task).where(Task.owner_id == owner_id)
-
-    if status:
+    if status is not None:
         statement = statement.where(Task.status == status)
+
+    statement = statement.offset(offset)
+
+    if limit is not None:
+        statement = statement.limit(limit)
 
     result = session.scalars(statement)
 

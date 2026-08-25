@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -142,3 +143,98 @@ def test_other_users_task_looks_missing(
         )
         is not None
     )
+
+
+def test_list_tasks_filters_by_status_query(
+    authenticated_client: TestClient,
+) -> None:
+    pending_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "待处理任务",
+        },
+    )
+    done_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "已完成任务",
+        },
+    )
+
+    done_task_id = done_response.json()["id"]
+
+    authenticated_client.put(
+        f"/tasks/{done_task_id}",
+        json={
+            "status": "done",
+        },
+    )
+
+    response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "status": "done",
+        },
+    )
+
+    assert pending_response.status_code == 201
+    assert done_response.status_code == 201
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [done_task_id]
+
+
+def test_list_tasks_applies_query_pagination(
+    authenticated_client: TestClient,
+) -> None:
+    created_tasks = [
+        authenticated_client.post(
+            "/tasks/",
+            json={
+                "title": f"任务 {number}",
+            },
+        ).json()
+        for number in range(1, 6)
+    ]
+
+    response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "limit": 2,
+            "offset": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [
+        created_tasks[2]["id"],
+        created_tasks[3]["id"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {
+            "status": "finished",
+        },
+        {
+            "limit": 0,
+        },
+        {
+            "limit": 101,
+        },
+        {
+            "offset": -1,
+        },
+    ],
+)
+def test_list_tasks_rejects_invalid_query(
+    authenticated_client: TestClient,
+    params: dict[str, str | int],
+) -> None:
+    response = authenticated_client.get(
+        "/tasks/",
+        params=params,
+    )
+
+    assert response.status_code == 422

@@ -186,3 +186,120 @@ def test_delete_task_returns_none_on_success(
             task_id=task.id,
             owner_id=user.id,
         )
+
+
+def test_list_tasks_filters_by_status(
+    db_session: Session,
+    user: User,
+) -> None:
+    pending_task = create_task(
+        db_session,
+        TaskCreate(
+            title="待处理任务",
+        ),
+        user.id,
+    )
+    done_task = create_task(
+        db_session,
+        TaskCreate(
+            title="已完成任务",
+        ),
+        user.id,
+    )
+
+    done_task.status = "done"
+    db_session.commit()
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        status="done",
+    )
+
+    assert [task.id for task in tasks] == [done_task.id]
+
+    assert pending_task.id not in {task.id for task in tasks}
+
+
+def test_list_tasks_applies_ordered_pagination(
+    db_session: Session,
+    user: User,
+) -> None:
+    created_tasks = [
+        create_task(
+            db_session,
+            TaskCreate(
+                title=f"任务 {number}",
+            ),
+            user.id,
+        )
+        for number in range(1, 6)
+    ]
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        limit=2,
+        offset=2,
+    )
+
+    assert [task.id for task in tasks] == [
+        created_tasks[2].id,
+        created_tasks[3].id,
+    ]
+
+
+def test_list_tasks_filters_owner_before_pagination(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    first_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="当前用户任务 1",
+        ),
+        user.id,
+    )
+    create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户任务 1",
+        ),
+        other_user.id,
+    )
+    second_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="当前用户任务 2",
+        ),
+        user.id,
+    )
+    create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户任务 2",
+        ),
+        other_user.id,
+    )
+    third_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="当前用户任务 3",
+        ),
+        user.id,
+    )
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        limit=2,
+        offset=1,
+    )
+
+    assert first_user_task.id not in {task.id for task in tasks}
+
+    assert [task.id for task in tasks] == [
+        second_user_task.id,
+        third_user_task.id,
+    ]
