@@ -24,6 +24,14 @@ dependencies = [
     "python-multipart",
     "openai",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "mypy",
+    "pytest",
+    "ruff",
+]
+
 [project.scripts]
 task = "task_cli.main:main"
 
@@ -46,3 +54,20 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+
+files = [
+    "src/task_cli/exceptions.py",
+    "src/task_cli/schemas.py",
+    "src/task_cli/services.py",
+    "src/task_cli/routers/tasks.py",
+]
+
+disallow_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+follow_imports = "silent"

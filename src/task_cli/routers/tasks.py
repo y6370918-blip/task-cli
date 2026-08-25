@@ -12,7 +12,7 @@ from task_cli.auth_dependencies import (
     get_current_user,
 )
 from task_cli.dependencies import get_db
-from task_cli.models import User
+from task_cli.models import Task, User
 from task_cli.schemas import (
     TaskCreate,
     TaskRead,
@@ -47,7 +47,7 @@ def create_task_api(
     data: TaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Task:
     return create_task(
         db,
         data,
@@ -82,7 +82,7 @@ def list_tasks_api(
     ] = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> list[Task]:
     return list_tasks(
         db,
         owner_id=current_user.id,
@@ -105,7 +105,7 @@ def get_task_api(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Task:
     return get_task(
         db,
         task_id,
@@ -127,7 +127,7 @@ def update_task_api(
     data: TaskUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Task:
     return update_task(
         db,
         task_id,
@@ -148,7 +148,7 @@ def delete_task_api(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> dict[str, str]:
     delete_task(
         db,
         task_id,
