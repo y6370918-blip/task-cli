@@ -12,6 +12,7 @@ description = "A simple task management CLI application"
 requires-python = ">=3.12"
 
 dependencies = [
+    "alembic",
     "pydantic[email]",
     "python-dotenv",
     "sqlalchemy",
