@@ -8,9 +8,12 @@ from task_cli.models import Task, User
 def test_create_task(
     authenticated_client,
 ):
-
     response = authenticated_client.post(
-        "/tasks/", json={"title": "测试任务", "description": "API测试"}
+        "/tasks/",
+        json={
+            "title": "测试任务",
+            "description": "API测试",
+        },
     )
 
     assert response.status_code == 201
@@ -18,6 +21,7 @@ def test_create_task(
     data = response.json()
 
     assert data["title"] == "测试任务"
+    assert data["priority"] == "medium"
 
 
 def test_list_tasks(authenticated_client):
@@ -235,6 +239,80 @@ def test_list_tasks_rejects_invalid_query(
     response = authenticated_client.get(
         "/tasks/",
         params=params,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_task_with_priority(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "紧急任务",
+            "priority": "high",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["priority"] == "high"
+
+
+def test_update_task_priority(
+    authenticated_client: TestClient,
+) -> None:
+    create_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "调整优先级",
+        },
+    )
+
+    task_id = create_response.json()["id"]
+
+    response = authenticated_client.put(
+        f"/tasks/{task_id}",
+        json={
+            "priority": "high",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["priority"] == "high"
+
+
+def test_create_task_rejects_invalid_priority(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "非法优先级",
+            "priority": "urgent",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_task_rejects_null_priority(
+    authenticated_client: TestClient,
+) -> None:
+    create_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "不能清空优先级",
+        },
+    )
+
+    task_id = create_response.json()["id"]
+
+    response = authenticated_client.put(
+        f"/tasks/{task_id}",
+        json={
+            "priority": None,
+        },
     )
 
     assert response.status_code == 422

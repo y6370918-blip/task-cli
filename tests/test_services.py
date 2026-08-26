@@ -303,3 +303,45 @@ def test_list_tasks_filters_owner_before_pagination(
         second_user_task.id,
         third_user_task.id,
     ]
+
+
+def test_create_task_with_priority(
+    db_session: Session,
+    user: User,
+) -> None:
+    task = create_task(
+        db_session,
+        TaskCreate(
+            title="高优先级任务",
+            priority="high",
+        ),
+        user.id,
+    )
+
+    assert task.priority == "high"
+
+
+def test_update_task_priority(
+    db_session: Session,
+    user: User,
+) -> None:
+    task = create_task(
+        db_session,
+        TaskCreate(
+            title="需要调整优先级",
+        ),
+        user.id,
+    )
+
+    updated_task = update_task(
+        db_session,
+        task_id=task.id,
+        data=TaskUpdate(
+            priority="high",
+        ),
+        owner_id=user.id,
+    )
+
+    assert updated_task.id == task.id
+    assert updated_task.priority == "high"
+    assert updated_task.owner_id == user.id

@@ -20,6 +20,7 @@ def create_task(
         title=data.title,
         description=data.description,
         status="pending",
+        priority=data.priority,
         owner_id=owner_id,
     )
 

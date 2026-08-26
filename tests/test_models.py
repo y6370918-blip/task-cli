@@ -29,3 +29,48 @@ def test_status_vaildation():
     task = TaskUpdate(status="done")
 
     assert task.status == "done"
+
+
+def test_task_priority_defaults_to_medium() -> None:
+    task = TaskCreate(
+        title="默认优先级任务",
+    )
+
+    assert task.priority == "medium"
+
+
+@pytest.mark.parametrize(
+    "priority",
+    [
+        "low",
+        "medium",
+        "high",
+    ],
+)
+def test_task_priority_accepts_allowed_values(
+    priority: str,
+) -> None:
+    task = TaskCreate(
+        title="合法优先级任务",
+        priority=priority,
+    )
+
+    assert task.priority == priority
+
+
+def test_task_priority_rejects_invalid_value() -> None:
+    with pytest.raises(ValidationError):
+        TaskCreate(
+            title="非法优先级任务",
+            priority="urgent",
+        )
+
+
+def test_task_update_rejects_null_priority() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="priority cannot be null",
+    ):
+        TaskUpdate(
+            priority=None,
+        )
