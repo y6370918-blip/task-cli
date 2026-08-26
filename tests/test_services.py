@@ -345,3 +345,46 @@ def test_update_task_priority(
     assert updated_task.id == task.id
     assert updated_task.priority == "high"
     assert updated_task.owner_id == user.id
+
+
+def test_list_tasks_filters_by_priority_and_owner(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    high_task = create_task(
+        db_session,
+        TaskCreate(
+            title="当前用户高优先级任务",
+            priority="high",
+        ),
+        user.id,
+    )
+
+    create_task(
+        db_session,
+        TaskCreate(
+            title="当前用户普通任务",
+            priority="medium",
+        ),
+        user.id,
+    )
+
+    create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户高优先级任务",
+            priority="high",
+        ),
+        other_user.id,
+    )
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        priority="high",
+    )
+
+    assert [task.id for task in tasks] == [
+        high_task.id,
+    ]

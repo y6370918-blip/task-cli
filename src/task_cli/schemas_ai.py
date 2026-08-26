@@ -4,7 +4,7 @@ from pydantic import (
     Field,
 )
 
-from task_cli.schemas import TaskStatus
+from task_cli.schemas import TaskPriority, TaskStatus
 
 
 class ListTasksToolArguments(BaseModel):
@@ -13,6 +13,7 @@ class ListTasksToolArguments(BaseModel):
     )
 
     status: TaskStatus | None = None
+    priority: TaskPriority | None = None
 
 
 class RequestDeleteTaskToolArguments(BaseModel):

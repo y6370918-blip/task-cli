@@ -15,6 +15,7 @@ from task_cli.dependencies import get_db
 from task_cli.models import Task, User
 from task_cli.schemas import (
     TaskCreate,
+    TaskPriority,
     TaskRead,
     TaskStatus,
     TaskUpdate,
@@ -69,6 +70,10 @@ def list_tasks_api(
         TaskStatus | None,
         Query(alias="status"),
     ] = None,
+    task_priority: Annotated[
+        TaskPriority | None,
+        Query(alias="priority"),
+    ] = None,
     limit: Annotated[
         int,
         Query(
@@ -87,6 +92,7 @@ def list_tasks_api(
         db,
         owner_id=current_user.id,
         status=task_status,
+        priority=task_priority,
         limit=limit,
         offset=offset,
     )

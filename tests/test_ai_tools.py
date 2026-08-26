@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from task_cli.ai_exceptions import AIToolError
-from task_cli.ai_tools import execute_tool
+from task_cli.ai_tools import TOOLS, execute_tool
 from task_cli.models import Task, User
 
 
@@ -170,3 +170,86 @@ def test_ai_tool_list_tasks_accepts_valid_status(
     assert result["success"] is True
     assert result["count"] == 1
     assert result["tasks"][0]["id"] == task.id
+
+
+def test_list_tasks_tool_declares_priority_enum() -> None:
+    list_tasks_tool = next(
+        tool for tool in TOOLS if tool["function"]["name"] == "list_tasks"
+    )
+
+    priority_schema = list_tasks_tool["function"]["parameters"]["properties"][
+        "priority"
+    ]
+
+    assert priority_schema["enum"] == [
+        "low",
+        "medium",
+        "high",
+    ]
+
+
+def test_ai_tool_list_tasks_filters_by_priority(
+    db_session: Session,
+    user: User,
+    other_user: User,
+    task: Task,
+) -> None:
+    task.priority = "high"
+
+    medium_task = Task(
+        title="当前用户普通任务",
+        description=None,
+        status="pending",
+        priority="medium",
+        owner_id=user.id,
+    )
+
+    other_user_task = Task(
+        title="其他用户高优先级任务",
+        description=None,
+        status="pending",
+        priority="high",
+        owner_id=other_user.id,
+    )
+
+    db_session.add_all(
+        [
+            medium_task,
+            other_user_task,
+        ]
+    )
+    db_session.commit()
+
+    raw_result = execute_tool(
+        name="list_tasks",
+        arguments={
+            "priority": "high",
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["tasks"][0]["id"] == task.id
+    assert result["tasks"][0]["priority"] == "high"
+
+
+def test_ai_tool_list_tasks_rejects_invalid_priority(
+    db_session: Session,
+    user: User,
+) -> None:
+    with pytest.raises(
+        AIToolError,
+        match="工具参数验证失败",
+    ):
+        execute_tool(
+            name="list_tasks",
+            arguments={
+                "priority": "urgent",
+            },
+            db=db_session,
+            owner_id=user.id,
+        )

@@ -222,6 +222,9 @@ def test_list_tasks_applies_query_pagination(
             "status": "finished",
         },
         {
+            "priority": "urgent",
+        },
+        {
             "limit": 0,
         },
         {
@@ -316,3 +319,36 @@ def test_update_task_rejects_null_priority(
     )
 
     assert response.status_code == 422
+
+
+def test_list_tasks_filters_by_priority_query(
+    authenticated_client: TestClient,
+) -> None:
+    high_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "高优先级任务",
+            "priority": "high",
+        },
+    )
+
+    authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "普通任务",
+            "priority": "medium",
+        },
+    )
+
+    response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "priority": "high",
+        },
+    )
+
+    assert high_response.status_code == 201
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [
+        high_response.json()["id"],
+    ]

@@ -31,8 +31,9 @@ TOOLS = [
             "name": "list_tasks",
             "description": (
                 "查询当前登录用户自己的任务。"
+                "可以按状态或优先级过滤。"
                 "当用户询问自己的任务、待办事项、"
-                "任务状态，或者要求总结任务时使用。"
+                "任务状态、任务优先级，或者要求总结任务时使用。"
             ),
             "parameters": {
                 "type": "object",
@@ -50,7 +51,21 @@ TOOLS = [
                             "doing 表示进行中，"
                             "done 表示已完成。"
                         ),
-                    }
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                        ],
+                        "description": (
+                            "可选的任务优先级过滤条件。"
+                            "low 表示低优先级，"
+                            "medium 表示中优先级，"
+                            "high 表示高优先级。"
+                        ),
+                    },
                 },
                 "additionalProperties": False,
             },
@@ -199,9 +214,10 @@ def execute_tool(
             data = ListTasksToolArguments.model_validate(arguments)
 
             tasks = list_tasks(
-                db,
-                owner_id,
-                data.status,
+                session=db,
+                owner_id=owner_id,
+                status=data.status,
+                priority=data.priority,
             )
 
             result = {
@@ -214,6 +230,7 @@ def execute_tool(
                         "title": task.title,
                         "description": task.description,
                         "status": task.status,
+                        "priority": task.priority,
                     }
                     for task in tasks
                 ],
@@ -253,6 +270,7 @@ def execute_tool(
                     "title": task.title,
                     "description": task.description,
                     "status": task.status,
+                    "priority": task.priority,
                 },
                 "message": (
                     "任务创建成功。"
@@ -302,6 +320,7 @@ def execute_tool(
                     "title": task.title,
                     "description": task.description,
                     "status": task.status,
+                    "priority": task.priority,
                 },
                 "message": (
                     "任务修改成功。"

@@ -5,6 +5,7 @@ from task_cli.exceptions import TaskNotFoundError
 from task_cli.models import Task
 from task_cli.schemas import (
     TaskCreate,
+    TaskPriority,
     TaskStatus,
     TaskUpdate,
 )
@@ -54,6 +55,7 @@ def list_tasks(
     session: Session,
     owner_id: int,
     status: TaskStatus | None = None,
+    priority: TaskPriority | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[Task]:
@@ -61,6 +63,9 @@ def list_tasks(
 
     if status is not None:
         statement = statement.where(Task.status == status)
+
+    if priority is not None:
+        statement = statement.where(Task.priority == priority)
 
     statement = statement.offset(offset)
 
