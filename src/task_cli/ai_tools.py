@@ -8,12 +8,13 @@ from task_cli.action_service import create_pending_action
 from task_cli.ai_exceptions import AIToolError
 from task_cli.exceptions import TaskNotFoundError
 from task_cli.schemas import (
-    TaskCreate,
     TaskUpdate,
 )
 from task_cli.schemas_ai import (
+    CreateTaskToolArguments,
     ListTasksToolArguments,
     RequestDeleteTaskToolArguments,
+    UpdateTaskToolArguments,
 )
 from task_cli.services import create_task, get_task, list_tasks, update_task
 
@@ -80,6 +81,7 @@ TOOLS = [
             "name": "create_task",
             "description": (
                 "为当前登录用户创建一个新的任务。"
+                "可以指定任务优先级。"
                 "任务会自动属于当前登录用户，"
                 "不需要也不能提供 owner_id。"
             ),
@@ -93,6 +95,15 @@ TOOLS = [
                     "description": {
                         "type": "string",
                         "description": "任务的详细描述，可选。",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                        ],
+                        "description": ("任务优先级，可选。未提供时默认为 medium。"),
                     },
                 },
                 "required": [
@@ -111,7 +122,7 @@ TOOLS = [
             "name": "update_task",
             "description": (
                 "修改当前登录用户自己的任务。"
-                "可以修改标题、描述或者任务状态。"
+                "可以修改标题、描述、任务状态或者优先级。"
                 "不能修改其他用户的任务。"
             ),
             "parameters": {
@@ -137,6 +148,15 @@ TOOLS = [
                             "done",
                         ],
                         "description": ("新的任务状态：pending、doing 或 done。"),
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                        ],
+                        "description": "新的任务优先级。",
                     },
                 },
                 "required": [
@@ -251,10 +271,7 @@ def execute_tool(
         # =================================================
 
         if name == "create_task":
-            data = TaskCreate(
-                title=arguments["title"],
-                description=arguments.get("description"),
-            )
+            data = CreateTaskToolArguments.model_validate(arguments)
 
             task = create_task(
                 db,
@@ -289,27 +306,39 @@ def execute_tool(
         # =================================================
 
         if name == "update_task":
-            task_id = arguments["task_id"]
+            # 先使用严格的 Tool 参数模型验证：
+            # - task_id 必须大于 0；
+            # - priority 只能是 low/medium/high；
+            # - owner_id 等额外字段会被拒绝。
+            tool_data = UpdateTaskToolArguments.model_validate(arguments)
 
-            # task_id 是工具自身的定位参数，
-            # 不属于 TaskUpdate 的字段，
-            # 所以这里把它排除。
-            update_fields = {
-                key: value for key, value in arguments.items() if key != "task_id"
-            }
+            # task_id 只负责定位任务，
+            # 不能作为任务字段传给 Service 更新。
+            task_id = tool_data.task_id
 
-            # 防止模型只传 task_id，
-            # 却没有任何真正需要修改的字段。
+            # 排除 task_id，只保留模型实际要求修改的字段。
+            update_fields = tool_data.model_dump(
+                exclude={
+                    "task_id",
+                },
+                exclude_unset=True,
+            )
+
+            # 如果模型只提供 task_id，
+            # 实际上没有任何需要修改的内容。
             if not update_fields:
                 raise AIToolError("没有提供需要修改的任务字段。")
 
-            data = TaskUpdate(**update_fields)
+            # 转换成 Service 真正需要的 TaskUpdate。
+            data = TaskUpdate.model_validate(update_fields)
 
+            # owner_id 仍然来自当前认证用户，
+            # 不允许由 AI Tool 参数决定。
             task = update_task(
-                db,
-                task_id,
-                data,
-                owner_id,
+                session=db,
+                task_id=task_id,
+                data=data,
+                owner_id=owner_id,
             )
 
             result = {

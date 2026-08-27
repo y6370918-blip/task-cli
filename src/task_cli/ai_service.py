@@ -15,7 +15,6 @@ from task_cli.ai_tools import (
     execute_tool,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -125,7 +124,7 @@ def run_task_assistant(
             try:
                 arguments = json.loads(call.function.arguments)
 
-            except json.JSONDecodeError as exc:
+            except json.JSONDecodeError:
                 logger.warning(
                     "AI tool arguments invalid name=%s owner_id=%s",
                     tool_name,
@@ -283,7 +282,9 @@ def run_task_assistant(
                     f"#{task.get('id')} "
                     f"{task.get('title')}，"
                     f"当前状态为 "
-                    f"{task.get('status')}。"
+                    f"{task.get('status')}，"
+                    f"优先级为 "
+                    f"{task.get('priority')}。"
                 )
 
             # =================================================
@@ -302,7 +303,9 @@ def run_task_assistant(
                     f"任务 #{task.get('id')} "
                     f"已修改成功。"
                     f"当前状态为 "
-                    f"{task.get('status')}。"
+                    f"{task.get('status')}，"
+                    f"优先级为 "
+                    f"{task.get('priority')}。"
                 )
 
             # =================================================
