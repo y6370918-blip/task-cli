@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -398,6 +399,31 @@ def test_ai_write_tools_declare_priority_enum(
     ]
 
 
+def test_ai_create_tool_declares_due_at() -> None:
+    tool = next(item for item in TOOLS if item["function"]["name"] == "create_task")
+
+    due_at_schema = tool["function"]["parameters"]["properties"]["due_at"]
+
+    assert due_at_schema["type"] == "string"
+    assert "时区" in due_at_schema["description"]
+
+
+def test_ai_update_tool_declares_nullable_due_at() -> None:
+    tool = next(item for item in TOOLS if item["function"]["name"] == "update_task")
+
+    due_at_schema = tool["function"]["parameters"]["properties"]["due_at"]
+
+    assert {
+        "type": "string",
+    } in due_at_schema["anyOf"]
+
+    assert {
+        "type": "null",
+    } in due_at_schema["anyOf"]
+
+    assert "时区" in due_at_schema["description"]
+
+
 def test_ai_create_tool_rejects_owner_id(
     db_session: Session,
     user: User,
@@ -413,6 +439,180 @@ def test_ai_create_tool_rejects_owner_id(
                 "priority": "high",
                 "owner_id": 999,
             },
+            db=db_session,
+            owner_id=user.id,
+        )
+
+
+def test_ai_tool_create_task_with_due_at(
+    db_session: Session,
+    user: User,
+) -> None:
+    due_at = datetime(
+        2026,
+        9,
+        5,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    raw_result = execute_tool(
+        name="create_task",
+        arguments={
+            "title": "AI 创建截止任务",
+            "due_at": due_at.isoformat(),
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    saved_task = db_session.get(
+        Task,
+        result["task"]["id"],
+    )
+
+    assert saved_task is not None
+    assert saved_task.due_at is not None
+
+    # SQLite 读取时间时可能丢失 tzinfo，
+    # 但这里输入的是 UTC，时间值本身不变。
+    assert saved_task.due_at.replace(tzinfo=UTC) == due_at
+
+    assert result["task"]["due_at"] == saved_task.due_at.isoformat()
+
+
+def test_ai_tool_list_tasks_returns_due_at(
+    db_session: Session,
+    user: User,
+    task: Task,
+) -> None:
+    task.due_at = datetime(
+        2026,
+        9,
+        6,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    db_session.commit()
+    db_session.refresh(task)
+
+    raw_result = execute_tool(
+        name="list_tasks",
+        arguments={},
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    assert result["tasks"][0]["id"] == task.id
+    assert result["tasks"][0]["due_at"] == task.due_at.isoformat()
+
+
+def test_ai_tool_update_task_due_at(
+    db_session: Session,
+    user: User,
+    task: Task,
+) -> None:
+    due_at = datetime(
+        2026,
+        9,
+        7,
+        18,
+        0,
+        tzinfo=UTC,
+    )
+
+    raw_result = execute_tool(
+        name="update_task",
+        arguments={
+            "task_id": task.id,
+            "due_at": due_at.isoformat(),
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    db_session.refresh(task)
+
+    assert task.due_at is not None
+    assert task.due_at.replace(tzinfo=UTC) == due_at
+    assert result["task"]["due_at"] == task.due_at.isoformat()
+
+
+def test_ai_tool_clear_task_due_at(
+    db_session: Session,
+    user: User,
+    task: Task,
+) -> None:
+    task.due_at = datetime(
+        2026,
+        9,
+        8,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    db_session.commit()
+
+    raw_result = execute_tool(
+        name="update_task",
+        arguments={
+            "task_id": task.id,
+            "due_at": None,
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    db_session.refresh(task)
+
+    assert task.due_at is None
+    assert result["task"]["due_at"] is None
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        (
+            "create_task",
+            {
+                "title": "无时区任务",
+                "due_at": "2026-09-09T10:00:00",
+            },
+        ),
+        (
+            "update_task",
+            {
+                "task_id": 1,
+                "due_at": "2026-09-09T10:00:00",
+            },
+        ),
+    ],
+)
+def test_ai_write_tools_reject_naive_due_at(
+    name: str,
+    arguments: dict,
+    db_session: Session,
+    user: User,
+) -> None:
+    with pytest.raises(
+        AIToolError,
+        match="工具参数验证失败",
+    ):
+        execute_tool(
+            name=name,
+            arguments=arguments,
             db=db_session,
             owner_id=user.id,
         )

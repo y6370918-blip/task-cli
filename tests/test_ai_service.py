@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -121,6 +122,7 @@ def test_create_task_executes_once_and_returns_immediately(
                 "title": "完成 Day24",
                 "description": "验证写操作只执行一次",
                 "priority": "high",
+                "due_at": "2026-09-10T18:00:00+08:00",
             },
         )
 
@@ -142,8 +144,14 @@ def test_create_task_executes_once_and_returns_immediately(
     assert len(tasks) == 1
     assert tasks[0].title == "完成 Day24"
     assert tasks[0].priority == "high"
+    assert tasks[0].due_at is not None
     assert reply == (
-        f"任务已创建：#{tasks[0].id} 完成 Day24，当前状态为 pending，优先级为 high。"
+        f"任务已创建：#{tasks[0].id} "
+        f"完成 Day24，"
+        f"当前状态为 pending，"
+        f"优先级为 high。"
+        f"截止时间为 "
+        f"{tasks[0].due_at.isoformat()}。"
     )
 
 
@@ -264,4 +272,74 @@ def test_update_task_priority_returns_immediately(
 
     assert provider_call_count == 1
     assert task.priority == "high"
-    assert reply == (f"任务 #{task.id} 已修改成功。当前状态为 pending，优先级为 high。")
+    assert reply == (
+        f"任务 #{task.id} "
+        f"已修改成功。"
+        f"当前状态为 pending，"
+        f"优先级为 high。"
+        f"截止时间为 未设置。"
+    )
+
+
+def test_clear_task_due_at_returns_immediately(
+    db_session: Session,
+    user: User,
+    task: Task,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task.due_at = datetime(
+        2026,
+        9,
+        11,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    db_session.commit()
+
+    provider_call_count = 0
+
+    def fake_provider(
+        messages: list[dict],
+    ):
+        nonlocal provider_call_count
+        provider_call_count += 1
+
+        return make_tool_response(
+            call_id="call-clear-due-at-1",
+            name="update_task",
+            arguments={
+                "task_id": task.id,
+                "due_at": None,
+            },
+        )
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    reply = ai_service.run_task_assistant(
+        db=db_session,
+        owner_id=user.id,
+        message="清除这个任务的截止时间",
+    )
+
+    db_session.refresh(task)
+
+    assert provider_call_count == 1
+    assert task.due_at is None
+    assert reply == (
+        f"任务 #{task.id} "
+        f"已修改成功。"
+        f"当前状态为 {task.status}，"
+        f"优先级为 {task.priority}。"
+        f"截止时间为 未设置。"
+    )
+
+
+def test_system_prompt_requires_explicit_deadline_context() -> None:
+    assert "相对或模糊时间" in ai_service.SYSTEM_PROMPT
+    assert "明确日期和时区" in ai_service.SYSTEM_PROMPT

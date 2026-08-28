@@ -38,6 +38,9 @@ SYSTEM_PROMPT = """
 - 不要要求用户提供 owner_id。
 - owner_id 由系统根据当前登录用户决定。
 - 不要猜测数据库中的任务内容。
+- 设置或修改截止时间时，只能使用包含时区的明确日期时间。
+- 如果用户只提供相对或模糊时间，必须先要求用户补充明确日期和时区，不能猜测后调用工具。
+- 用户明确要求清除截止时间时，调用 update_task 并把 due_at 设为 null。
 - 删除属于危险操作，只能请求删除，不能直接执行删除。
 """
 
@@ -276,6 +279,7 @@ def run_task_assistant(
                     "task",
                     {},
                 )
+                due_at = task.get("due_at") or "未设置"
 
                 return (
                     f"任务已创建："
@@ -285,6 +289,8 @@ def run_task_assistant(
                     f"{task.get('status')}，"
                     f"优先级为 "
                     f"{task.get('priority')}。"
+                    f"截止时间为 "
+                    f"{due_at}。"
                 )
 
             # =================================================
@@ -298,6 +304,7 @@ def run_task_assistant(
                     "task",
                     {},
                 )
+                due_at = task.get("due_at") or "未设置"
 
                 return (
                     f"任务 #{task.get('id')} "
@@ -306,6 +313,8 @@ def run_task_assistant(
                     f"{task.get('status')}，"
                     f"优先级为 "
                     f"{task.get('priority')}。"
+                    f"截止时间为 "
+                    f"{due_at}。"
                 )
 
             # =================================================

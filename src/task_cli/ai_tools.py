@@ -81,7 +81,7 @@ TOOLS = [
             "name": "create_task",
             "description": (
                 "为当前登录用户创建一个新的任务。"
-                "可以指定任务优先级。"
+                "可以指定任务优先级和截止时间。"
                 "任务会自动属于当前登录用户，"
                 "不需要也不能提供 owner_id。"
             ),
@@ -105,6 +105,16 @@ TOOLS = [
                         ],
                         "description": ("任务优先级，可选。未提供时默认为 medium。"),
                     },
+                    "due_at": {
+                        "type": "string",
+                        "description": (
+                            "任务截止时间，可选。"
+                            "必须使用包含时区的 ISO 8601 时间，"
+                            "例如 2026-09-01T18:00:00+08:00。"
+                            "如果用户只提供模糊或相对时间，"
+                            "必须先要求用户补充明确日期和时区。"
+                        ),
+                    },
                 },
                 "required": [
                     "title",
@@ -122,7 +132,7 @@ TOOLS = [
             "name": "update_task",
             "description": (
                 "修改当前登录用户自己的任务。"
-                "可以修改标题、描述、任务状态或者优先级。"
+                "可以修改标题、描述、任务状态、优先级或者截止时间。"
                 "不能修改其他用户的任务。"
             ),
             "parameters": {
@@ -157,6 +167,24 @@ TOOLS = [
                             "high",
                         ],
                         "description": "新的任务优先级。",
+                    },
+                    "due_at": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                            },
+                            {
+                                "type": "null",
+                            },
+                        ],
+                        "description": (
+                            "新的任务截止时间。"
+                            "设置时间时必须使用包含时区的 ISO 8601 时间，"
+                            "例如 2026-09-01T18:00:00+08:00。"
+                            "传入 null 表示清除原截止时间。"
+                            "如果用户只提供模糊或相对时间，"
+                            "必须先要求用户补充明确日期和时区。"
+                        ),
                     },
                 },
                 "required": [
@@ -251,6 +279,9 @@ def execute_tool(
                         "description": task.description,
                         "status": task.status,
                         "priority": task.priority,
+                        "due_at": (
+                            task.due_at.isoformat() if task.due_at is not None else None
+                        ),
                     }
                     for task in tasks
                 ],
@@ -288,6 +319,9 @@ def execute_tool(
                     "description": task.description,
                     "status": task.status,
                     "priority": task.priority,
+                    "due_at": (
+                        task.due_at.isoformat() if task.due_at is not None else None
+                    ),
                 },
                 "message": (
                     "任务创建成功。"
@@ -350,6 +384,9 @@ def execute_tool(
                     "description": task.description,
                     "status": task.status,
                     "priority": task.priority,
+                    "due_at": (
+                        task.due_at.isoformat() if task.due_at is not None else None
+                    ),
                 },
                 "message": (
                     "任务修改成功。"
