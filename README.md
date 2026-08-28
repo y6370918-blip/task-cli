@@ -1,69 +1,92 @@
-# Task CLI
+# task-cli
 
-一个基于 Python 的命令行任务管理工具。
+一个使用 FastAPI、PostgreSQL 和 DeepSeek Tool Calling 构建的 AI 任务管理 API。
 
-## Features
+项目最初是命令行任务管理器，目前已经演进为多用户 Web API。仓库名称保留为 `task-cli`，但正式产品入口是 FastAPI。
 
-- 创建任务
-- 查看任务
-- 更新任务状态
-- 删除任务
-- SQLite 数据持久化
-- Pydantic 数据校验
-- SQLAlchemy ORM
-- 自动化测试
+## Current Features
+
+- 用户注册和登录
+- JWT Authentication
+- 用户任务数据隔离
+- 创建、查询、修改和删除任务
+- 状态、优先级和截止时间
+- 分页与过滤
+- DeepSeek Tool Calling
+- AI 创建、查询和修改任务
+- 删除操作人工确认
+- PostgreSQL 数据持久化
+- Alembic 数据库迁移
+- pytest 自动化测试
+- Docker Compose
+- pre-commit 和 GitHub Actions
 
 ## Tech Stack
 
 - Python 3.12
+- FastAPI
 - Pydantic
 - SQLAlchemy
-- SQLite
+- PostgreSQL
+- Alembic
+- DeepSeek API
 - pytest
+- Docker
 
-## Installation
+## Local Development
 
-创建虚拟环境：
+创建并启用虚拟环境，然后安装依赖：
 
-```bash
+```powershell
 python -m venv .venv
-安装依赖：
-pip install -e .
-Run
-task
-或者：
-python -m task_cli.main
-Test
-pytest
-Project Structure
-src/
-└── task_cli/
-    ├── main.py
-    ├── cli.py
-    ├── services.py
-    ├── models.py
-    ├── schemas.py
-    ├── database.py
-    ├── config.py
-    └── logger.py
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
 
+启动 PostgreSQL：
 
-## Run with Docker
+```powershell
+docker compose up -d db
+```
 
+升级数据库：
 
-Build:
+```powershell
+python -m alembic upgrade head
+```
 
-docker build -t task-api .
+启动 API：
 
+```powershell
+uvicorn task_cli.api:app --reload
+```
 
-Run:
+打开 API 文档：
 
-docker run -p 8000:8000 task-api
-
-
-Open:
-
+```text
 http://127.0.0.1:8000/docs
+```
 
----
+## Tests
+
+```powershell
+python -m pytest -q
+```
+
+## Docker Compose
+
+```powershell
+docker compose up -d --build
+```
+
+查看服务：
+
+```powershell
+docker compose ps
+```
+
+停止服务时不要添加 `-v`，除非确定要删除 PostgreSQL 数据：
+
+```powershell
+docker compose down
 ```
