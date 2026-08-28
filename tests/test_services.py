@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -388,3 +390,42 @@ def test_list_tasks_filters_by_priority_and_owner(
     assert [task.id for task in tasks] == [
         high_task.id,
     ]
+
+
+def test_create_and_clear_task_due_at(
+    db_session: Session,
+    user: User,
+) -> None:
+    due_at = datetime(
+        2026,
+        9,
+        1,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    task = create_task(
+        db_session,
+        TaskCreate(
+            title="有截止时间的任务",
+            due_at=due_at,
+        ),
+        user.id,
+    )
+
+    assert task.due_at is not None
+
+    # SQLite 会丢失 tzinfo，但保存的 UTC 时间值不变。
+    assert task.due_at.replace(tzinfo=UTC) == due_at
+
+    updated_task = update_task(
+        db_session,
+        task_id=task.id,
+        data=TaskUpdate(
+            due_at=None,
+        ),
+        owner_id=user.id,
+    )
+
+    assert updated_task.due_at is None

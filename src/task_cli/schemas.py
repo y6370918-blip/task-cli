@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 TaskStatus = Literal[
     "pending",
@@ -24,6 +24,8 @@ class TaskCreate(BaseModel):
 
     priority: TaskPriority = "medium"
 
+    due_at: AwareDatetime | None = None
+
     description: str | None = Field(
         default=None,
         max_length=500,
@@ -42,6 +44,8 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
 
     priority: TaskPriority | None = None
+
+    due_at: AwareDatetime | None = None
 
     @field_validator("priority")
     @classmethod
@@ -63,3 +67,4 @@ class TaskRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     priority: TaskPriority
+    due_at: datetime | None

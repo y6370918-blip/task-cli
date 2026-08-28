@@ -1,8 +1,19 @@
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from task_cli.models import Task, User
+
+
+def _as_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+
+    return parsed.astimezone(UTC)
 
 
 def test_create_task(
@@ -352,3 +363,97 @@ def test_list_tasks_filters_by_priority_query(
     assert [task["id"] for task in response.json()] == [
         high_response.json()["id"],
     ]
+
+
+def test_create_task_with_due_at(
+    authenticated_client: TestClient,
+) -> None:
+    due_at = datetime(
+        2026,
+        9,
+        1,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "按时完成 Day36",
+            "due_at": due_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    assert _as_utc(response.json()["due_at"]) == due_at
+
+
+def test_update_task_due_at(
+    authenticated_client: TestClient,
+) -> None:
+    create_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "设置截止时间",
+        },
+    )
+
+    task_id = create_response.json()["id"]
+
+    due_at = datetime(
+        2026,
+        9,
+        2,
+        18,
+        0,
+        tzinfo=UTC,
+    )
+
+    response = authenticated_client.put(
+        f"/tasks/{task_id}",
+        json={
+            "due_at": due_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert _as_utc(response.json()["due_at"]) == due_at
+
+
+def test_clear_task_due_at(
+    authenticated_client: TestClient,
+) -> None:
+    create_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "清除截止时间",
+            "due_at": "2026-09-03T10:00:00+00:00",
+        },
+    )
+
+    task_id = create_response.json()["id"]
+
+    response = authenticated_client.put(
+        f"/tasks/{task_id}",
+        json={
+            "due_at": None,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["due_at"] is None
+
+
+def test_create_task_rejects_naive_due_at(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "没有时区的截止时间",
+            "due_at": "2026-09-03T10:00:00",
+        },
+    )
+
+    assert response.status_code == 422

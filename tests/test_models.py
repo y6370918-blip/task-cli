@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -74,3 +76,48 @@ def test_task_update_rejects_null_priority() -> None:
         TaskUpdate(
             priority=None,
         )
+
+
+def test_task_due_at_accepts_timezone() -> None:
+    due_at = datetime(
+        2026,
+        9,
+        1,
+        10,
+        0,
+        tzinfo=UTC,
+    )
+
+    task = TaskCreate(
+        title="有截止时间的任务",
+        due_at=due_at,
+    )
+
+    assert task.due_at == due_at
+
+
+def test_task_due_at_rejects_naive_datetime() -> None:
+    with pytest.raises(ValidationError):
+        TaskCreate(
+            title="模糊截止时间",
+            due_at=datetime(
+                2026,
+                9,
+                1,
+                10,
+                0,
+            ),
+        )
+
+
+def test_task_update_distinguishes_omitted_and_null_due_at() -> None:
+    omitted = TaskUpdate()
+    cleared = TaskUpdate(
+        due_at=None,
+    )
+
+    assert omitted.model_dump(exclude_unset=True) == {}
+
+    assert cleared.model_dump(exclude_unset=True) == {
+        "due_at": None,
+    }
