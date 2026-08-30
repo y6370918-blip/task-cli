@@ -74,6 +74,10 @@ def list_tasks_api(
         TaskPriority | None,
         Query(alias="priority"),
     ] = None,
+    overdue: Annotated[
+        bool,
+        Query(),
+    ] = False,
     limit: Annotated[
         int,
         Query(
@@ -93,6 +97,7 @@ def list_tasks_api(
         owner_id=current_user.id,
         status=task_status,
         priority=task_priority,
+        overdue=overdue,
         limit=limit,
         offset=offset,
     )

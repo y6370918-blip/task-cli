@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -57,6 +59,7 @@ def list_tasks(
     owner_id: int,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
+    overdue: bool = False,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[Task]:
@@ -67,6 +70,15 @@ def list_tasks(
 
     if priority is not None:
         statement = statement.where(Task.priority == priority)
+
+    if overdue:
+        now = datetime.now(UTC)
+
+        statement = statement.where(
+            Task.due_at.is_not(None),
+            Task.due_at < now,
+            Task.status != "done",
+        )
 
     statement = statement.offset(offset)
 

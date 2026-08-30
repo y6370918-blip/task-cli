@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -239,6 +239,9 @@ def test_list_tasks_applies_query_pagination(
             "limit": 0,
         },
         {
+            "overdue": "not-a-bool",
+        },
+        {
             "limit": 101,
         },
         {
@@ -457,3 +460,71 @@ def test_create_task_rejects_naive_due_at(
     )
 
     assert response.status_code == 422
+
+
+def test_list_tasks_filters_by_overdue_query(
+    authenticated_client: TestClient,
+) -> None:
+    now = datetime.now(UTC)
+
+    overdue_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "已经逾期",
+            "due_at": (now - timedelta(days=1)).isoformat(),
+        },
+    )
+
+    authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "未来任务",
+            "due_at": (now + timedelta(days=1)).isoformat(),
+        },
+    )
+
+    authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "没有截止时间",
+        },
+    )
+
+    completed_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "已完成的过期任务",
+            "due_at": (now - timedelta(days=2)).isoformat(),
+        },
+    )
+
+    authenticated_client.put(
+        f"/tasks/{completed_response.json()['id']}",
+        json={
+            "status": "done",
+        },
+    )
+
+    response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "overdue": "true",
+        },
+    )
+
+    assert overdue_response.status_code == 201
+    assert completed_response.status_code == 201
+    assert response.status_code == 200
+
+    assert [task["id"] for task in response.json()] == [
+        overdue_response.json()["id"],
+    ]
+    unfiltered_response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "overdue": "false",
+        },
+    )
+
+    assert unfiltered_response.status_code == 200
+    assert len(unfiltered_response.json()) == 4

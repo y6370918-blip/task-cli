@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -429,3 +429,86 @@ def test_create_and_clear_task_due_at(
     )
 
     assert updated_task.due_at is None
+
+
+def test_list_tasks_filters_overdue_incomplete_tasks(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    now = datetime.now(UTC)
+
+    overdue_pending_task = create_task(
+        db_session,
+        TaskCreate(
+            title="已逾期待处理任务",
+            due_at=now - timedelta(days=1),
+        ),
+        user.id,
+    )
+
+    overdue_doing_task = create_task(
+        db_session,
+        TaskCreate(
+            title="已逾期进行中任务",
+            due_at=now - timedelta(hours=1),
+        ),
+        user.id,
+    )
+    overdue_doing_task.status = "doing"
+
+    future_task = create_task(
+        db_session,
+        TaskCreate(
+            title="未来任务",
+            due_at=now + timedelta(days=1),
+        ),
+        user.id,
+    )
+
+    no_due_at_task = create_task(
+        db_session,
+        TaskCreate(
+            title="没有截止时间",
+        ),
+        user.id,
+    )
+
+    completed_task = create_task(
+        db_session,
+        TaskCreate(
+            title="已完成的过期任务",
+            due_at=now - timedelta(days=2),
+        ),
+        user.id,
+    )
+    completed_task.status = "done"
+
+    other_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户的逾期任务",
+            due_at=now - timedelta(days=1),
+        ),
+        other_user.id,
+    )
+
+    db_session.commit()
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        overdue=True,
+    )
+
+    assert [task.id for task in tasks] == [
+        overdue_pending_task.id,
+        overdue_doing_task.id,
+    ]
+
+    returned_ids = {task.id for task in tasks}
+
+    assert future_task.id not in returned_ids
+    assert no_due_at_task.id not in returned_ids
+    assert completed_task.id not in returned_ids
+    assert other_user_task.id not in returned_ids
