@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import httpx2
@@ -224,3 +225,202 @@ def test_call_ai_provider_keeps_generic_error_fallback(
 
     assert type(exc_info.value) is AIProviderError
     assert exc_info.value.__cause__ is sdk_error
+
+
+def test_call_ai_provider_logs_success_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    response = SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=120,
+            completion_tokens=35,
+            total_tokens=155,
+        ),
+    )
+
+    def return_response(
+        **kwargs: object,
+    ) -> object:
+        return response
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=return_response,
+            ),
+        ),
+    )
+    times = iter(
+        [
+            10.0,
+            10.125,
+        ]
+    )
+
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_client",
+        lambda: fake_client,
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_model",
+        lambda: "deepseek-chat",
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "perf_counter",
+        lambda: next(times),
+        raising=False,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="task_cli.ai_provider",
+    ):
+        result = ai_provider.call_ai_provider(
+            messages=[],
+        )
+
+    assert result is response
+    assert (
+        "AI provider completed "
+        "model=deepseek-chat "
+        "duration_ms=125.00 "
+        "input_tokens=120 "
+        "output_tokens=35 "
+        "total_tokens=155 "
+        "success=true"
+    ) in caplog.messages
+
+
+def test_call_ai_provider_logs_sanitized_failure_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sensitive_provider_detail = "sensitive-provider-response-body"
+    sdk_error = APIConnectionError(
+        message=sensitive_provider_detail,
+        request=httpx2.Request(
+            "POST",
+            "https://api.deepseek.com/chat/completions",
+        ),
+    )
+
+    def raise_connection_error(
+        **kwargs: object,
+    ) -> None:
+        raise sdk_error
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=raise_connection_error,
+            ),
+        ),
+    )
+    times = iter(
+        [
+            20.0,
+            20.25,
+        ]
+    )
+
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_client",
+        lambda: fake_client,
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_model",
+        lambda: "deepseek-chat",
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "perf_counter",
+        lambda: next(times),
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="task_cli.ai_provider",
+    ):
+        with pytest.raises(
+            AIProviderConnectionError,
+        ):
+            ai_provider.call_ai_provider(
+                messages=[],
+            )
+
+    assert (
+        "AI provider failed "
+        "model=deepseek-chat "
+        "duration_ms=250.00 "
+        "error_type=AIProviderConnectionError "
+        "success=false"
+    ) in caplog.messages
+
+    assert sensitive_provider_detail not in caplog.text
+
+
+def test_call_ai_provider_handles_missing_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    response = SimpleNamespace()
+
+    def return_response(
+        **kwargs: object,
+    ) -> object:
+        return response
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=return_response,
+            ),
+        ),
+    )
+    times = iter(
+        [
+            30.0,
+            30.01,
+        ]
+    )
+
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_client",
+        lambda: fake_client,
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "get_ai_model",
+        lambda: "deepseek-chat",
+    )
+    monkeypatch.setattr(
+        ai_provider,
+        "perf_counter",
+        lambda: next(times),
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="task_cli.ai_provider",
+    ):
+        result = ai_provider.call_ai_provider(
+            messages=[],
+        )
+
+    assert result is response
+    assert (
+        "AI provider completed "
+        "model=deepseek-chat "
+        "duration_ms=10.00 "
+        "input_tokens=None "
+        "output_tokens=None "
+        "total_tokens=None "
+        "success=true"
+    ) in caplog.messages

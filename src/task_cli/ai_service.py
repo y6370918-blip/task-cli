@@ -74,11 +74,14 @@ def run_task_assistant(
         try:
             response = call_ai_provider(messages)
 
-        except AIProviderError:
-            logger.exception(
-                "AI provider failed owner_id=%s",
+        except AIProviderError as exc:
+            logger.error(
+                "AI provider failed owner_id=%s error_type=%s",
                 owner_id,
+                type(exc).__name__,
             )
+
+            raise
 
             raise
 

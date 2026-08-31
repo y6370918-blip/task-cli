@@ -1,4 +1,5 @@
 import json
+import logging
 from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import task_cli.ai_service as ai_service
-from task_cli.ai_exceptions import AIProviderError
+from task_cli.ai_exceptions import AIProviderConnectionError, AIProviderError
 from task_cli.models import Task, User
 
 
@@ -343,3 +344,104 @@ def test_clear_task_due_at_returns_immediately(
 def test_system_prompt_requires_explicit_deadline_context() -> None:
     assert "相对或模糊时间" in ai_service.SYSTEM_PROMPT
     assert "明确日期和时区" in ai_service.SYSTEM_PROMPT
+
+
+def test_agent_logs_round_and_tool_without_sensitive_content(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sensitive_user_message = "这是不能写入日志的私人任务"
+    sensitive_tool_argument = "这是不能写入日志的任务标题"
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        return make_tool_response(
+            call_id="call-private-create",
+            name="create_task",
+            arguments={
+                "title": sensitive_tool_argument,
+            },
+        )
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="task_cli.ai_service",
+    ):
+        reply = ai_service.run_task_assistant(
+            db=db_session,
+            owner_id=user.id,
+            message=sensitive_user_message,
+        )
+
+    service_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "task_cli.ai_service"
+    ]
+
+    assert f"AI agent round=1 owner_id={user.id}" in service_messages
+    assert f"AI tool call name=create_task owner_id={user.id}" in service_messages
+
+    logged_text = "\n".join(service_messages)
+
+    assert sensitive_user_message not in logged_text
+    assert sensitive_tool_argument not in logged_text
+    assert sensitive_tool_argument in reply
+
+
+def test_provider_failure_log_does_not_expose_exception_chain(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sensitive_provider_detail = "sensitive-provider-response-body"
+
+    def failing_provider(
+        messages: list[dict],
+    ) -> None:
+        try:
+            raise RuntimeError(sensitive_provider_detail)
+        except RuntimeError as exc:
+            raise AIProviderConnectionError("无法连接 DeepSeek API") from exc
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        failing_provider,
+    )
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="task_cli.ai_service",
+    ):
+        with pytest.raises(
+            AIProviderConnectionError,
+        ):
+            ai_service.run_task_assistant(
+                db=db_session,
+                owner_id=user.id,
+                message="查询任务",
+            )
+
+    service_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "task_cli.ai_service"
+    ]
+
+    assert (
+        f"AI provider failed "
+        f"owner_id={user.id} "
+        f"error_type=AIProviderConnectionError" in service_messages
+    )
+    assert sensitive_provider_detail not in caplog.text
