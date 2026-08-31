@@ -62,6 +62,8 @@ def list_tasks(
     overdue: bool = False,
     limit: int | None = None,
     offset: int = 0,
+    *,
+    now: datetime | None = None,
 ) -> list[Task]:
     statement = select(Task).where(Task.owner_id == owner_id).order_by(Task.id)
 
@@ -72,11 +74,11 @@ def list_tasks(
         statement = statement.where(Task.priority == priority)
 
     if overdue:
-        now = datetime.now(UTC)
+        reference_time = now if now is not None else datetime.now(UTC)
 
         statement = statement.where(
             Task.due_at.is_not(None),
-            Task.due_at < now,
+            Task.due_at < reference_time,
             Task.status != "done",
         )
 

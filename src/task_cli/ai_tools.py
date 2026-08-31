@@ -32,7 +32,7 @@ TOOLS = [
             "name": "list_tasks",
             "description": (
                 "查询当前登录用户自己的任务。"
-                "可以按状态或优先级过滤。"
+                "可以按状态、优先级或是否逾期过滤。"
                 "当用户询问自己的任务、待办事项、"
                 "任务状态、任务优先级，或者要求总结任务时使用。"
             ),
@@ -65,6 +65,14 @@ TOOLS = [
                             "low 表示低优先级，"
                             "medium 表示中优先级，"
                             "high 表示高优先级。"
+                        ),
+                    },
+                    "overdue": {
+                        "type": "boolean",
+                        "description": (
+                            "是否只查询已经逾期但尚未完成的任务。"
+                            "设置为 true 时，只返回截止时间已过且状态不是 done 的任务。"
+                            "未提供时默认为 false。"
                         ),
                     },
                 },
@@ -266,6 +274,7 @@ def execute_tool(
                 owner_id=owner_id,
                 status=data.status,
                 priority=data.priority,
+                overdue=data.overdue,
             )
 
             result = {

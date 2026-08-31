@@ -14,6 +14,7 @@ class ListTasksToolArguments(BaseModel):
 
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    overdue: bool = False
 
 
 class CreateTaskToolArguments(TaskCreate):

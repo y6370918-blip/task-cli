@@ -616,3 +616,90 @@ def test_ai_write_tools_reject_naive_due_at(
             db=db_session,
             owner_id=user.id,
         )
+
+
+def test_list_tasks_tool_declares_overdue_boolean() -> None:
+    tool = next(item for item in TOOLS if item["function"]["name"] == "list_tasks")
+
+    overdue_schema = tool["function"]["parameters"]["properties"]["overdue"]
+
+    assert overdue_schema["type"] == "boolean"
+    assert "逾期" in overdue_schema["description"]
+
+    create_tool = next(
+        item for item in TOOLS if item["function"]["name"] == "create_task"
+    )
+
+    assert "overdue" not in create_tool["function"]["parameters"]["properties"]
+
+
+def test_ai_tool_list_tasks_filters_overdue(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    overdue_task = Task(
+        title="当前用户逾期任务",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=datetime(
+            2000,
+            1,
+            1,
+            tzinfo=UTC,
+        ),
+        owner_id=user.id,
+    )
+
+    future_task = Task(
+        title="当前用户未来任务",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=datetime(
+            2100,
+            1,
+            1,
+            tzinfo=UTC,
+        ),
+        owner_id=user.id,
+    )
+
+    other_user_task = Task(
+        title="其他用户逾期任务",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=datetime(
+            2000,
+            1,
+            1,
+            tzinfo=UTC,
+        ),
+        owner_id=other_user.id,
+    )
+
+    db_session.add_all(
+        [
+            overdue_task,
+            future_task,
+            other_user_task,
+        ]
+    )
+    db_session.commit()
+
+    raw_result = execute_tool(
+        name="list_tasks",
+        arguments={
+            "overdue": True,
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["tasks"][0]["id"] == overdue_task.id

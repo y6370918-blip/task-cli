@@ -436,13 +436,20 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
     user: User,
     other_user: User,
 ) -> None:
-    now = datetime.now(UTC)
 
+    fixed_now = datetime(
+        2026,
+        9,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
     overdue_pending_task = create_task(
         db_session,
         TaskCreate(
             title="已逾期待处理任务",
-            due_at=now - timedelta(days=1),
+            due_at=fixed_now - timedelta(days=1),
         ),
         user.id,
     )
@@ -451,7 +458,7 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
         db_session,
         TaskCreate(
             title="已逾期进行中任务",
-            due_at=now - timedelta(hours=1),
+            due_at=fixed_now - timedelta(hours=1),
         ),
         user.id,
     )
@@ -461,7 +468,16 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
         db_session,
         TaskCreate(
             title="未来任务",
-            due_at=now + timedelta(days=1),
+            due_at=fixed_now + timedelta(days=1),
+        ),
+        user.id,
+    )
+
+    due_now_task = create_task(
+        db_session,
+        TaskCreate(
+            title="刚好到达截止时间",
+            due_at=fixed_now,
         ),
         user.id,
     )
@@ -478,7 +494,7 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
         db_session,
         TaskCreate(
             title="已完成的过期任务",
-            due_at=now - timedelta(days=2),
+            due_at=fixed_now - timedelta(days=2),
         ),
         user.id,
     )
@@ -488,7 +504,7 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
         db_session,
         TaskCreate(
             title="其他用户的逾期任务",
-            due_at=now - timedelta(days=1),
+            due_at=fixed_now - timedelta(days=1),
         ),
         other_user.id,
     )
@@ -499,6 +515,7 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
         db_session,
         owner_id=user.id,
         overdue=True,
+        now=fixed_now,
     )
 
     assert [task.id for task in tasks] == [
@@ -512,3 +529,4 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
     assert no_due_at_task.id not in returned_ids
     assert completed_task.id not in returned_ids
     assert other_user_task.id not in returned_ids
+    assert due_now_task.id not in returned_ids
