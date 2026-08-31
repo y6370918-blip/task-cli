@@ -15,6 +15,8 @@ TaskPriority = Literal[
     "high",
 ]
 
+TaskSort = Literal["due_at"]
+
 
 class TaskCreate(BaseModel):
     title: str = Field(

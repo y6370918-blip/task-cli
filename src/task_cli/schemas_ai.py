@@ -4,7 +4,7 @@ from pydantic import (
     Field,
 )
 
-from task_cli.schemas import TaskCreate, TaskPriority, TaskStatus, TaskUpdate
+from task_cli.schemas import TaskCreate, TaskPriority, TaskSort, TaskStatus, TaskUpdate
 
 
 class ListTasksToolArguments(BaseModel):
@@ -15,6 +15,12 @@ class ListTasksToolArguments(BaseModel):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     overdue: bool = False
+    due_within_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=365,
+    )
+    sort: TaskSort | None = None
 
 
 class CreateTaskToolArguments(TaskCreate):

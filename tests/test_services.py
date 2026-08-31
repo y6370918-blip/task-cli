@@ -530,3 +530,211 @@ def test_list_tasks_filters_overdue_incomplete_tasks(
     assert completed_task.id not in returned_ids
     assert other_user_task.id not in returned_ids
     assert due_now_task.id not in returned_ids
+
+
+def test_list_tasks_filters_due_within_days(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    fixed_now = datetime(
+        2026,
+        9,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+
+    due_now_task = create_task(
+        db_session,
+        TaskCreate(
+            title="现在到期",
+            due_at=fixed_now,
+        ),
+        user.id,
+    )
+
+    due_soon_task = create_task(
+        db_session,
+        TaskCreate(
+            title="三天后到期",
+            due_at=fixed_now + timedelta(days=3),
+        ),
+        user.id,
+    )
+
+    due_at_boundary_task = create_task(
+        db_session,
+        TaskCreate(
+            title="刚好七天后到期",
+            due_at=fixed_now + timedelta(days=7),
+        ),
+        user.id,
+    )
+
+    overdue_task = create_task(
+        db_session,
+        TaskCreate(
+            title="已经逾期",
+            due_at=fixed_now - timedelta(seconds=1),
+        ),
+        user.id,
+    )
+
+    outside_window_task = create_task(
+        db_session,
+        TaskCreate(
+            title="超过七天",
+            due_at=fixed_now + timedelta(days=7, seconds=1),
+        ),
+        user.id,
+    )
+
+    no_due_at_task = create_task(
+        db_session,
+        TaskCreate(
+            title="没有截止时间",
+        ),
+        user.id,
+    )
+
+    completed_task = create_task(
+        db_session,
+        TaskCreate(
+            title="范围内但已经完成",
+            due_at=fixed_now + timedelta(days=2),
+        ),
+        user.id,
+    )
+    completed_task.status = "done"
+
+    other_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户即将到期",
+            due_at=fixed_now + timedelta(days=1),
+        ),
+        other_user.id,
+    )
+
+    db_session.commit()
+
+    tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        due_within_days=7,
+        now=fixed_now,
+    )
+
+    assert [task.id for task in tasks] == [
+        due_now_task.id,
+        due_soon_task.id,
+        due_at_boundary_task.id,
+    ]
+
+    returned_ids = {task.id for task in tasks}
+
+    assert overdue_task.id not in returned_ids
+    assert outside_window_task.id not in returned_ids
+    assert no_due_at_task.id not in returned_ids
+    assert completed_task.id not in returned_ids
+    assert other_user_task.id not in returned_ids
+
+
+def test_list_tasks_sorts_due_at_before_pagination(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    base_due_at = datetime(
+        2026,
+        9,
+        1,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+
+    no_due_at_task = create_task(
+        db_session,
+        TaskCreate(
+            title="没有截止时间",
+        ),
+        user.id,
+    )
+
+    late_task = create_task(
+        db_session,
+        TaskCreate(
+            title="三天后到期",
+            due_at=base_due_at + timedelta(days=3),
+        ),
+        user.id,
+    )
+
+    same_due_first_task = create_task(
+        db_session,
+        TaskCreate(
+            title="两天后到期 A",
+            due_at=base_due_at + timedelta(days=2),
+        ),
+        user.id,
+    )
+
+    early_task = create_task(
+        db_session,
+        TaskCreate(
+            title="一天后到期",
+            due_at=base_due_at + timedelta(days=1),
+        ),
+        user.id,
+    )
+
+    same_due_second_task = create_task(
+        db_session,
+        TaskCreate(
+            title="两天后到期 B",
+            due_at=base_due_at + timedelta(days=2),
+        ),
+        user.id,
+    )
+
+    other_user_task = create_task(
+        db_session,
+        TaskCreate(
+            title="其他用户最早到期",
+            due_at=base_due_at,
+        ),
+        other_user.id,
+    )
+
+    sorted_tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        sort="due_at",
+    )
+
+    assert [task.id for task in sorted_tasks] == [
+        early_task.id,
+        same_due_first_task.id,
+        same_due_second_task.id,
+        late_task.id,
+        no_due_at_task.id,
+    ]
+
+    paginated_tasks = list_tasks(
+        db_session,
+        owner_id=user.id,
+        sort="due_at",
+        offset=1,
+        limit=3,
+    )
+
+    assert [task.id for task in paginated_tasks] == [
+        same_due_first_task.id,
+        same_due_second_task.id,
+        late_task.id,
+    ]
+
+    assert other_user_task.id not in {task.id for task in sorted_tasks}

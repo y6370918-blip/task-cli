@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +8,7 @@ from task_cli.models import Task
 from task_cli.schemas import (
     TaskCreate,
     TaskPriority,
+    TaskSort,
     TaskStatus,
     TaskUpdate,
 )
@@ -60,12 +61,16 @@ def list_tasks(
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
     overdue: bool = False,
+    due_within_days: int | None = None,
+    sort: TaskSort | None = None,
     limit: int | None = None,
     offset: int = 0,
     *,
     now: datetime | None = None,
 ) -> list[Task]:
-    statement = select(Task).where(Task.owner_id == owner_id).order_by(Task.id)
+    statement = select(Task).where(Task.owner_id == owner_id)
+
+    reference_time = now if now is not None else datetime.now(UTC)
 
     if status is not None:
         statement = statement.where(Task.status == status)
@@ -74,13 +79,31 @@ def list_tasks(
         statement = statement.where(Task.priority == priority)
 
     if overdue:
-        reference_time = now if now is not None else datetime.now(UTC)
-
         statement = statement.where(
             Task.due_at.is_not(None),
             Task.due_at < reference_time,
             Task.status != "done",
         )
+
+    if due_within_days is not None:
+        window_end = reference_time + timedelta(
+            days=due_within_days,
+        )
+
+        statement = statement.where(
+            Task.due_at.is_not(None),
+            Task.due_at >= reference_time,
+            Task.due_at <= window_end,
+            Task.status != "done",
+        )
+
+    if sort == "due_at":
+        statement = statement.order_by(
+            Task.due_at.asc().nulls_last(),
+            Task.id,
+        )
+    else:
+        statement = statement.order_by(Task.id)
 
     statement = statement.offset(offset)
 

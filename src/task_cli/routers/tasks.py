@@ -17,6 +17,7 @@ from task_cli.schemas import (
     TaskCreate,
     TaskPriority,
     TaskRead,
+    TaskSort,
     TaskStatus,
     TaskUpdate,
 )
@@ -78,6 +79,17 @@ def list_tasks_api(
         bool,
         Query(),
     ] = False,
+    due_within_days: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            le=365,
+        ),
+    ] = None,
+    sort: Annotated[
+        TaskSort | None,
+        Query(),
+    ] = None,
     limit: Annotated[
         int,
         Query(
@@ -98,6 +110,8 @@ def list_tasks_api(
         status=task_status,
         priority=task_priority,
         overdue=overdue,
+        due_within_days=due_within_days,
+        sort=sort,
         limit=limit,
         offset=offset,
     )

@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -633,6 +633,116 @@ def test_list_tasks_tool_declares_overdue_boolean() -> None:
     assert "overdue" not in create_tool["function"]["parameters"]["properties"]
 
 
+def test_list_tasks_tool_declares_upcoming_and_due_at_sort() -> None:
+    list_tool = next(item for item in TOOLS if item["function"]["name"] == "list_tasks")
+    properties = list_tool["function"]["parameters"]["properties"]
+
+    due_within_days_schema = properties["due_within_days"]
+    sort_schema = properties["sort"]
+
+    assert due_within_days_schema["type"] == "integer"
+    assert due_within_days_schema["minimum"] == 1
+    assert due_within_days_schema["maximum"] == 365
+    assert sort_schema["type"] == "string"
+    assert sort_schema["enum"] == ["due_at"]
+
+    create_tool = next(
+        item for item in TOOLS if item["function"]["name"] == "create_task"
+    )
+    create_properties = create_tool["function"]["parameters"]["properties"]
+
+    assert "due_within_days" not in create_properties
+    assert "sort" not in create_properties
+
+
+def test_ai_tool_list_tasks_filters_upcoming_and_sorts_due_at(
+    db_session: Session,
+    user: User,
+    other_user: User,
+) -> None:
+    now = datetime.now(UTC)
+
+    no_due_at_task = Task(
+        title="没有截止时间",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=None,
+        owner_id=user.id,
+    )
+    later_task = Task(
+        title="三天后到期",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=now + timedelta(days=3),
+        owner_id=user.id,
+    )
+    earlier_task = Task(
+        title="一天后到期",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=now + timedelta(days=1),
+        owner_id=user.id,
+    )
+    outside_window_task = Task(
+        title="八天后到期",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=now + timedelta(days=8),
+        owner_id=user.id,
+    )
+    completed_task = Task(
+        title="范围内但已经完成",
+        description=None,
+        status="done",
+        priority="medium",
+        due_at=now + timedelta(days=2),
+        owner_id=user.id,
+    )
+    other_user_task = Task(
+        title="其他用户即将到期",
+        description=None,
+        status="pending",
+        priority="medium",
+        due_at=now + timedelta(hours=1),
+        owner_id=other_user.id,
+    )
+
+    db_session.add_all(
+        [
+            no_due_at_task,
+            later_task,
+            earlier_task,
+            outside_window_task,
+            completed_task,
+            other_user_task,
+        ]
+    )
+    db_session.commit()
+
+    raw_result = execute_tool(
+        name="list_tasks",
+        arguments={
+            "due_within_days": 7,
+            "sort": "due_at",
+        },
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert [task["id"] for task in result["tasks"]] == [
+        earlier_task.id,
+        later_task.id,
+    ]
+
+
 def test_ai_tool_list_tasks_filters_overdue(
     db_session: Session,
     user: User,
@@ -703,3 +813,34 @@ def test_ai_tool_list_tasks_filters_overdue(
     assert result["success"] is True
     assert result["count"] == 1
     assert result["tasks"][0]["id"] == overdue_task.id
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "due_within_days": 0,
+        },
+        {
+            "due_within_days": 366,
+        },
+        {
+            "sort": "title",
+        },
+    ],
+)
+def test_ai_tool_list_tasks_rejects_invalid_upcoming_arguments(
+    db_session: Session,
+    user: User,
+    arguments: dict[str, object],
+) -> None:
+    with pytest.raises(
+        AIToolError,
+        match="工具参数验证失败",
+    ):
+        execute_tool(
+            name="list_tasks",
+            arguments=arguments,
+            db=db_session,
+            owner_id=user.id,
+        )

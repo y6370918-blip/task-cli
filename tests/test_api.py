@@ -247,6 +247,15 @@ def test_list_tasks_applies_query_pagination(
         {
             "offset": -1,
         },
+        {
+            "due_within_days": 0,
+        },
+        {
+            "due_within_days": 366,
+        },
+        {
+            "sort": "title",
+        },
     ],
 )
 def test_list_tasks_rejects_invalid_query(
@@ -528,3 +537,69 @@ def test_list_tasks_filters_by_overdue_query(
 
     assert unfiltered_response.status_code == 200
     assert len(unfiltered_response.json()) == 4
+
+
+def test_list_tasks_filters_upcoming_and_sorts_due_at(
+    authenticated_client: TestClient,
+) -> None:
+    now = datetime.now(UTC)
+
+    authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "没有截止时间",
+        },
+    )
+
+    later_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "三天后到期",
+            "due_at": (now + timedelta(days=3)).isoformat(),
+        },
+    )
+
+    earlier_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "一天后到期",
+            "due_at": (now + timedelta(days=1)).isoformat(),
+        },
+    )
+
+    authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "超出查询范围",
+            "due_at": (now + timedelta(days=8)).isoformat(),
+        },
+    )
+
+    completed_response = authenticated_client.post(
+        "/tasks/",
+        json={
+            "title": "范围内但已经完成",
+            "due_at": (now + timedelta(days=2)).isoformat(),
+        },
+    )
+
+    authenticated_client.put(
+        f"/tasks/{completed_response.json()['id']}",
+        json={
+            "status": "done",
+        },
+    )
+
+    response = authenticated_client.get(
+        "/tasks/",
+        params={
+            "due_within_days": 7,
+            "sort": "due_at",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()] == [
+        earlier_response.json()["id"],
+        later_response.json()["id"],
+    ]

@@ -32,9 +32,10 @@ TOOLS = [
             "name": "list_tasks",
             "description": (
                 "查询当前登录用户自己的任务。"
-                "可以按状态、优先级或是否逾期过滤。"
+                "可以按状态、优先级或是否逾期或即将到期过滤。"
+                "也可以按截止时间排序。"
                 "当用户询问自己的任务、待办事项、"
-                "任务状态、任务优先级，或者要求总结任务时使用。"
+                "任务状态、任务优先级，或者截止时间时使用。"
             ),
             "parameters": {
                 "type": "object",
@@ -73,6 +74,27 @@ TOOLS = [
                             "是否只查询已经逾期但尚未完成的任务。"
                             "设置为 true 时，只返回截止时间已过且状态不是 done 的任务。"
                             "未提供时默认为 false。"
+                        ),
+                    },
+                    "due_within_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365,
+                        "description": (
+                            "只查询从当前时间开始、"
+                            "未来指定天数内到期且尚未完成的任务。"
+                            "例如 7 表示查询未来 7 天内到期的任务。"
+                        ),
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": [
+                            "due_at",
+                        ],
+                        "description": (
+                            "可选的排序方式。"
+                            "due_at 表示按截止时间从早到晚排序，"
+                            "没有截止时间的任务排在最后。"
                         ),
                     },
                 },
@@ -275,6 +297,8 @@ def execute_tool(
                 status=data.status,
                 priority=data.priority,
                 overdue=data.overdue,
+                due_within_days=data.due_within_days,
+                sort=data.sort,
             )
 
             result = {
