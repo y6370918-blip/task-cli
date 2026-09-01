@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 import task_cli.ai_service as ai_service
 from task_cli.ai_exceptions import AIProviderConnectionError, AIProviderError
+from task_cli.conversation_service import (
+    create_conversation,
+    create_message,
+    list_conversation_messages,
+)
 from task_cli.models import Task, User
 
 
@@ -445,3 +450,275 @@ def test_provider_failure_log_does_not_expose_exception_chain(
         f"error_type=AIProviderConnectionError" in service_messages
     )
     assert sensitive_provider_detail not in caplog.text
+
+
+def test_assistant_loads_and_persists_conversation_history(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="user",
+        content="我之前问过什么？",
+    )
+
+    create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="assistant",
+        content="你之前询问了任务情况。",
+    )
+
+    provider_messages: list[list[dict]] = []
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        provider_messages.append(deepcopy(messages))
+
+        return make_text_response("现在继续处理你的任务。")
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    reply = ai_service.run_task_assistant(
+        db=db_session,
+        owner_id=user.id,
+        message="那我们继续吧",
+        conversation_id=conversation.id,
+    )
+
+    assert reply == "现在继续处理你的任务。"
+
+    assert [
+        (
+            message["role"],
+            message["content"],
+        )
+        for message in provider_messages[0]
+    ] == [
+        (
+            "system",
+            ai_service.SYSTEM_PROMPT,
+        ),
+        (
+            "user",
+            "我之前问过什么？",
+        ),
+        (
+            "assistant",
+            "你之前询问了任务情况。",
+        ),
+        (
+            "user",
+            "那我们继续吧",
+        ),
+    ]
+
+    persisted_messages = list_conversation_messages(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+    )
+
+    assert [
+        (
+            message.role,
+            message.content,
+        )
+        for message in persisted_messages
+    ] == [
+        (
+            "user",
+            "我之前问过什么？",
+        ),
+        (
+            "assistant",
+            "你之前询问了任务情况。",
+        ),
+        (
+            "user",
+            "那我们继续吧",
+        ),
+        (
+            "assistant",
+            "现在继续处理你的任务。",
+        ),
+    ]
+
+
+def test_assistant_persists_tool_call_protocol(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    responses = iter(
+        [
+            make_tool_response(
+                call_id="call-history-list-1",
+                name="list_tasks",
+                arguments={},
+            ),
+            make_text_response("你目前没有任务。"),
+        ]
+    )
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        return next(responses)
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    reply = ai_service.run_task_assistant(
+        db=db_session,
+        owner_id=user.id,
+        message="查询我的任务",
+        conversation_id=conversation.id,
+    )
+
+    assert reply == "你目前没有任务。"
+
+    history = list_conversation_messages(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+    )
+
+    assert [message.role for message in history] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+
+    assert history[1].content is None
+    assert history[1].tool_calls is not None
+    assert history[1].tool_calls[0]["id"] == "call-history-list-1"
+
+    assert history[2].tool_call_id == "call-history-list-1"
+    assert history[3].content == "你目前没有任务。"
+
+
+def test_provider_failure_keeps_user_message(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    def failing_provider(
+        messages: list[dict],
+    ) -> None:
+        raise AIProviderError("模拟 Provider 失败")
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        failing_provider,
+    )
+
+    with pytest.raises(
+        AIProviderError,
+    ):
+        ai_service.run_task_assistant(
+            db=db_session,
+            owner_id=user.id,
+            message="这条消息必须保留",
+            conversation_id=conversation.id,
+        )
+
+    history = list_conversation_messages(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+    )
+
+    assert [
+        (
+            message.role,
+            message.content,
+        )
+        for message in history
+    ] == [
+        (
+            "user",
+            "这条消息必须保留",
+        ),
+    ]
+
+
+def test_write_tool_generated_reply_is_persisted(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        return make_tool_response(
+            call_id="call-persist-create-1",
+            name="create_task",
+            arguments={
+                "title": "保存写操作回复",
+                "priority": "high",
+            },
+        )
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    reply = ai_service.run_task_assistant(
+        db=db_session,
+        owner_id=user.id,
+        message="创建一个高优先级任务",
+        conversation_id=conversation.id,
+    )
+
+    history = list_conversation_messages(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+    )
+
+    assert [message.role for message in history] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+
+    assert history[-1].content == reply
+    assert "保存写操作回复" in reply

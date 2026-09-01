@@ -1,40 +1,48 @@
-from task_cli.action_exceptions import (
-    PendingActionAlreadyHandledError,
-    PendingActionExpiredError,
-    PendingActionNotFoundError,
-)
-
-from task_cli.action_service import (
-    cancel_pending_action,
-    confirm_pending_action,
-)
-
-from task_cli.exceptions import (
-    TaskNotFoundError,
-)
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
     status,
 )
-
 from sqlalchemy.orm import Session
 
+from task_cli.action_exceptions import (
+    PendingActionAlreadyHandledError,
+    PendingActionExpiredError,
+    PendingActionNotFoundError,
+)
+from task_cli.action_service import (
+    cancel_pending_action,
+    confirm_pending_action,
+)
+from task_cli.ai_exceptions import AIServiceError
 from task_cli.ai_service import (
     run_task_assistant,
 )
 from task_cli.auth_dependencies import (
     get_current_user,
 )
+from task_cli.conversation_exceptions import (
+    ConversationNotFoundError,
+)
+from task_cli.conversation_service import (
+    create_conversation,
+    get_conversation,
+    list_conversations,
+    list_visible_conversation_messages,
+)
 from task_cli.dependencies import get_db
+from task_cli.exceptions import (
+    TaskNotFoundError,
+)
 from task_cli.models import User
 from task_cli.schemas_ai import (
+    ActionResponse,
     AssistantRequest,
     AssistantResponse,
-    ActionResponse,
+    ConversationMessageRead,
+    ConversationRead,
 )
-from task_cli.ai_exceptions import AIServiceError
 
 router = APIRouter(
     prefix="/assistant",
@@ -49,27 +57,90 @@ router = APIRouter(
 def assistant(
     data: AssistantRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> AssistantResponse:
+    try:
+        if data.conversation_id is None:
+            conversation = create_conversation(
+                session=db,
+                owner_id=current_user.id,
+            )
+
+        else:
+            conversation = get_conversation(
+                session=db,
+                conversation_id=(data.conversation_id),
+                owner_id=current_user.id,
+            )
+
+    except ConversationNotFoundError:
+        raise HTTPException(
+            status_code=(status.HTTP_404_NOT_FOUND),
+            detail="会话不存在",
+        ) from None
 
     try:
         reply = run_task_assistant(
             db=db,
             owner_id=current_user.id,
             message=data.message,
+            conversation_id=conversation.id,
         )
 
     except AIServiceError:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail="AI 服务暂时不可用",
-        )
+        ) from None
 
     return AssistantResponse(
-        reply=reply
+        conversation_id=conversation.id,
+        reply=reply,
     )
+
+
+@router.get(
+    "/conversations",
+    response_model=list[ConversationRead],
+)
+def get_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ConversationRead]:
+    conversations = list_conversations(
+        session=db,
+        owner_id=current_user.id,
+    )
+
+    return [
+        ConversationRead.model_validate(conversation) for conversation in conversations
+    ]
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=list[ConversationMessageRead],
+)
+def get_conversation_messages(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ConversationMessageRead]:
+    try:
+        messages = list_visible_conversation_messages(
+            session=db,
+            conversation_id=conversation_id,
+            owner_id=current_user.id,
+        )
+
+    except ConversationNotFoundError:
+        raise HTTPException(
+            status_code=(status.HTTP_404_NOT_FOUND),
+            detail="会话不存在",
+        ) from None
+
+    return [ConversationMessageRead.model_validate(message) for message in messages]
+
 
 @router.post(
     "/actions/{action_id}/confirm",
@@ -78,9 +149,7 @@ def assistant(
 def confirm_action(
     action_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> ActionResponse:
 
     try:
@@ -94,31 +163,32 @@ def confirm_action(
         raise HTTPException(
             status_code=404,
             detail="待确认操作不存在",
-        )
+        ) from None
 
     except PendingActionExpiredError:
         raise HTTPException(
             status_code=410,
             detail="待确认操作已经过期",
-        )
+        ) from None
 
     except PendingActionAlreadyHandledError:
         raise HTTPException(
             status_code=409,
             detail="该操作已经被处理",
-        )
+        ) from None
 
     except TaskNotFoundError:
         raise HTTPException(
             status_code=404,
             detail="任务不存在",
-        )
+        ) from None
 
     return ActionResponse(
         action_id=action.id,
         status=action.status,
         message="操作已经确认并执行",
     )
+
 
 @router.post(
     "/actions/{action_id}/cancel",
@@ -127,9 +197,7 @@ def confirm_action(
 def cancel_action(
     action_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        get_current_user
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> ActionResponse:
 
     try:
@@ -143,19 +211,19 @@ def cancel_action(
         raise HTTPException(
             status_code=404,
             detail="待确认操作不存在",
-        )
+        ) from None
 
     except PendingActionExpiredError:
         raise HTTPException(
             status_code=410,
             detail="待确认操作已经过期",
-        )
+        ) from None
 
     except PendingActionAlreadyHandledError:
         raise HTTPException(
             status_code=409,
             detail="该操作已经被处理",
-        )
+        ) from None
 
     return ActionResponse(
         action_id=action.id,

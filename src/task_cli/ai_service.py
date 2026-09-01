@@ -14,6 +14,11 @@ from task_cli.ai_provider import (
 from task_cli.ai_tools import (
     execute_tool,
 )
+from task_cli.conversation_service import (
+    create_message,
+    list_conversation_messages,
+)
+from task_cli.models import Message
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +50,127 @@ SYSTEM_PROMPT = """
 """
 
 
+def _message_to_provider_data(
+    message: Message,
+) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "role": message.role,
+        "content": message.content,
+    }
+
+    if message.tool_calls is not None:
+        data["tool_calls"] = message.tool_calls
+
+    if message.tool_call_id is not None:
+        data["tool_call_id"] = message.tool_call_id
+
+    return data
+
+
+def _persist_message(
+    db: Session,
+    owner_id: int,
+    conversation_id: int | None,
+    role: str,
+    content: str | None,
+    tool_calls: (list[dict[str, object]] | None) = None,
+    tool_call_id: str | None = None,
+) -> None:
+    if conversation_id is None:
+        return
+
+    create_message(
+        session=db,
+        conversation_id=conversation_id,
+        owner_id=owner_id,
+        role=role,
+        content=content,
+        tool_calls=tool_calls,
+        tool_call_id=tool_call_id,
+    )
+
+
+def _append_tool_message(
+    messages: list[Any],
+    db: Session,
+    owner_id: int,
+    conversation_id: int | None,
+    tool_call_id: str,
+    content: str,
+) -> None:
+    messages.append(
+        {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": content,
+        }
+    )
+
+    _persist_message(
+        db=db,
+        owner_id=owner_id,
+        conversation_id=conversation_id,
+        role="tool",
+        content=content,
+        tool_call_id=tool_call_id,
+    )
+
+
+def _finish_with_assistant_reply(
+    db: Session,
+    owner_id: int,
+    conversation_id: int | None,
+    reply: str,
+) -> str:
+    _persist_message(
+        db=db,
+        owner_id=owner_id,
+        conversation_id=conversation_id,
+        role="assistant",
+        content=reply,
+    )
+
+    return reply
+
+
 def run_task_assistant(
     db: Session,
     owner_id: int,
     message: str,
+    conversation_id: int | None = None,
 ) -> str:
-
     messages: list[Any] = [
         {
             "role": "system",
             "content": SYSTEM_PROMPT,
         },
+    ]
+
+    if conversation_id is not None:
+        history = list_conversation_messages(
+            session=db,
+            conversation_id=conversation_id,
+            owner_id=owner_id,
+        )
+
+        messages.extend(
+            _message_to_provider_data(history_message) for history_message in history
+        )
+
+    messages.append(
         {
             "role": "user",
             "content": message,
-        },
-    ]
+        }
+    )
+
+    _persist_message(
+        db=db,
+        owner_id=owner_id,
+        conversation_id=conversation_id,
+        role="user",
+        content=message,
+    )
 
     executed_calls: set[str] = set()
 
@@ -76,12 +186,10 @@ def run_task_assistant(
 
         except AIProviderError as exc:
             logger.error(
-                "AI provider failed owner_id=%s error_type=%s",
+                ("AI provider failed owner_id=%s error_type=%s"),
                 owner_id,
                 type(exc).__name__,
             )
-
-            raise
 
             raise
 
@@ -90,49 +198,60 @@ def run_task_assistant(
         tool_calls = assistant_message.tool_calls
 
         if not tool_calls:
-            return assistant_message.content or "AI 没有返回有效内容。"
+            reply = assistant_message.content or "AI 没有返回有效内容。"
+
+            return _finish_with_assistant_reply(
+                db=db,
+                owner_id=owner_id,
+                conversation_id=(conversation_id),
+                reply=reply,
+            )
+
+        serialized_tool_calls: list[dict[str, object]] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": (call.function.name),
+                    "arguments": (call.function.arguments),
+                },
+            }
+            for call in tool_calls
+        ]
 
         messages.append(
             {
                 "role": "assistant",
                 "content": (assistant_message.content),
-                "tool_calls": [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {
-                            "name": (call.function.name),
-                            "arguments": (call.function.arguments),
-                        },
-                    }
-                    for call in tool_calls
-                ],
+                "tool_calls": (serialized_tool_calls),
             }
         )
 
-        # =================================================
-        # 5. 执行所有 Tool Calls
-        # =================================================
+        _persist_message(
+            db=db,
+            owner_id=owner_id,
+            conversation_id=conversation_id,
+            role="assistant",
+            content=(assistant_message.content),
+            tool_calls=serialized_tool_calls,
+        )
 
+        # 执行本轮的所有 Tool Calls。
         for call in tool_calls:
             tool_name = call.function.name
 
             logger.info(
-                "AI tool call name=%s owner_id=%s",
+                ("AI tool call name=%s owner_id=%s"),
                 tool_name,
                 owner_id,
             )
-
-            # ---------------------------------------------
-            # 解析 DeepSeek 返回的 JSON 参数
-            # ---------------------------------------------
 
             try:
                 arguments = json.loads(call.function.arguments)
 
             except json.JSONDecodeError:
                 logger.warning(
-                    "AI tool arguments invalid name=%s owner_id=%s",
+                    ("AI tool arguments invalid name=%s owner_id=%s"),
                     tool_name,
                     owner_id,
                 )
@@ -145,24 +264,16 @@ def run_task_assistant(
                     ensure_ascii=False,
                 )
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": tool_result,
-                    }
+                _append_tool_message(
+                    messages=messages,
+                    db=db,
+                    owner_id=owner_id,
+                    conversation_id=(conversation_id),
+                    tool_call_id=call.id,
+                    content=tool_result,
                 )
 
                 continue
-
-            # =================================================
-            # 6. 构造工具调用唯一标识
-            #
-            # 例如：
-            #
-            # update_task:
-            # {"status":"done","task_id":2}
-            # =================================================
 
             normalized_arguments = json.dumps(
                 arguments,
@@ -172,13 +283,9 @@ def run_task_assistant(
 
             call_key = f"{tool_name}:{normalized_arguments}"
 
-            # =================================================
-            # 7. 防止重复执行完全相同的工具
-            # =================================================
-
             if call_key in executed_calls:
                 logger.warning(
-                    "Duplicate AI tool call prevented name=%s owner_id=%s",
+                    ("Duplicate AI tool call prevented name=%s owner_id=%s"),
                     tool_name,
                     owner_id,
                 )
@@ -191,22 +298,18 @@ def run_task_assistant(
                     ensure_ascii=False,
                 )
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": tool_result,
-                    }
+                _append_tool_message(
+                    messages=messages,
+                    db=db,
+                    owner_id=owner_id,
+                    conversation_id=(conversation_id),
+                    tool_call_id=call.id,
+                    content=tool_result,
                 )
 
                 continue
 
-            # 在真正执行之前记录
             executed_calls.add(call_key)
-
-            # =================================================
-            # 8. 真正执行 Python Tool
-            # =================================================
 
             try:
                 tool_result = execute_tool(
@@ -218,7 +321,7 @@ def run_task_assistant(
 
             except AIToolError as exc:
                 logger.warning(
-                    "AI tool failed name=%s owner_id=%s error=%s",
+                    ("AI tool failed name=%s owner_id=%s error=%s"),
                     tool_name,
                     owner_id,
                     exc,
@@ -232,21 +335,14 @@ def run_task_assistant(
                     ensure_ascii=False,
                 )
 
-            # =================================================
-            # 9. 把 Tool Result 加回消息历史
-            # =================================================
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": tool_result,
-                }
+            _append_tool_message(
+                messages=messages,
+                db=db,
+                owner_id=owner_id,
+                conversation_id=(conversation_id),
+                tool_call_id=call.id,
+                content=tool_result,
             )
-
-            # =================================================
-            # 10. 尝试读取 Tool Result
-            # =================================================
 
             try:
                 result_data = json.loads(tool_result)
@@ -254,37 +350,22 @@ def run_task_assistant(
             except json.JSONDecodeError:
                 result_data = {}
 
-            # =================================================
-            # 11. 如果工具执行失败
-            #
-            # 不直接退出。
-            #
-            # 让 DeepSeek 下一轮根据错误给用户解释。
-            # =================================================
-
             if not result_data.get(
                 "success",
                 False,
             ):
                 continue
 
-            # =================================================
-            # 12. 创建成功
-            #
-            # 写操作已经完成。
-            #
-            # Python 直接返回，
-            # 不再让 DeepSeek重复决定是否 create。
-            # =================================================
-
+            # 写操作成功后直接返回，防止模型重复执行。
             if tool_name == "create_task":
                 task = result_data.get(
                     "task",
                     {},
                 )
+
                 due_at = task.get("due_at") or "未设置"
 
-                return (
+                reply = (
                     f"任务已创建："
                     f"#{task.get('id')} "
                     f"{task.get('title')}，"
@@ -296,20 +377,22 @@ def run_task_assistant(
                     f"{due_at}。"
                 )
 
-            # =================================================
-            # 13. 修改成功
-            #
-            # 这是你当前死循环问题的关键修复。
-            # =================================================
+                return _finish_with_assistant_reply(
+                    db=db,
+                    owner_id=owner_id,
+                    conversation_id=(conversation_id),
+                    reply=reply,
+                )
 
             if tool_name == "update_task":
                 task = result_data.get(
                     "task",
                     {},
                 )
+
                 due_at = task.get("due_at") or "未设置"
 
-                return (
+                reply = (
                     f"任务 #{task.get('id')} "
                     f"已修改成功。"
                     f"当前状态为 "
@@ -320,18 +403,19 @@ def run_task_assistant(
                     f"{due_at}。"
                 )
 
-            # =================================================
-            # 14. 请求删除
-            #
-            # 不执行真正 DELETE。
-            # =================================================
+                return _finish_with_assistant_reply(
+                    db=db,
+                    owner_id=owner_id,
+                    conversation_id=(conversation_id),
+                    reply=reply,
+                )
 
             if tool_name == "request_delete_task":
                 task_id = result_data.get("task_id")
 
                 confirmation_id = result_data.get("confirmation_id")
 
-                return (
+                reply = (
                     f"删除任务 #{task_id} "
                     f"需要确认。"
                     f"确认操作编号为 "
@@ -339,22 +423,25 @@ def run_task_assistant(
                     f"请确认或取消该操作。"
                 )
 
-            # =================================================
-            # list_tasks 不在这里 return
-            #
-            # 因为我们希望 DeepSeek 根据真实任务数据，
-            # 给用户整理成自然语言回答。
-            #
-            # 所以继续下一轮。
-            # =================================================
+                return _finish_with_assistant_reply(
+                    db=db,
+                    owner_id=owner_id,
+                    conversation_id=(conversation_id),
+                    reply=reply,
+                )
 
-    # =====================================================
-    # 5轮之后仍然没有结束
-    # =====================================================
+            # list_tasks 是读操作，需要模型继续整理结果。
 
     logger.warning(
-        "AI agent exceeded max rounds owner_id=%s",
+        ("AI agent exceeded max rounds owner_id=%s"),
         owner_id,
     )
 
-    return "AI 执行步骤过多，请尝试把请求描述得更简单一些。"
+    reply = "AI 执行步骤过多，请尝试把请求描述得更简单一些。"
+
+    return _finish_with_assistant_reply(
+        db=db,
+        owner_id=owner_id,
+        conversation_id=conversation_id,
+        reply=reply,
+    )
