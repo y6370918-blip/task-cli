@@ -15,7 +15,7 @@ from task_cli.conversation_service import (
     create_message,
     list_conversation_messages,
 )
-from task_cli.models import Task, User
+from task_cli.models import Message, Task, User
 
 
 def make_text_response(content: str) -> SimpleNamespace:
@@ -722,3 +722,113 @@ def test_write_tool_generated_reply_is_persisted(
 
     assert history[-1].content == reply
     assert "保存写操作回复" in reply
+
+
+def test_assistant_uses_safe_history_selector(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    older_message = create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="user",
+        content="较早的历史",
+    )
+
+    recent_message = create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="assistant",
+        content="选择器保留的历史",
+    )
+
+    candidates = [
+        older_message,
+        recent_message,
+    ]
+
+    def fake_list_conversation_messages(
+        session: Session,
+        conversation_id: int,
+        owner_id: int,
+        limit: int,
+    ) -> list[Message]:
+        assert session is db_session
+        assert conversation_id == conversation.id
+        assert owner_id == user.id
+        assert limit == ai_service.HISTORY_CANDIDATE_LIMIT
+
+        return candidates
+
+    def fake_select_history_messages(
+        messages: list[Message],
+    ) -> list[Message]:
+        assert messages == candidates
+
+        return [
+            recent_message,
+        ]
+
+    provider_messages: list[list[dict]] = []
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        provider_messages.append(deepcopy(messages))
+
+        return make_text_response("已经使用安全历史回答。")
+
+    monkeypatch.setattr(
+        ai_service,
+        "list_conversation_messages",
+        fake_list_conversation_messages,
+    )
+    monkeypatch.setattr(
+        ai_service,
+        "select_history_messages",
+        fake_select_history_messages,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    reply = ai_service.run_task_assistant(
+        db=db_session,
+        owner_id=user.id,
+        message="这是当前消息",
+        conversation_id=conversation.id,
+    )
+
+    assert reply == ("已经使用安全历史回答。")
+
+    assert [
+        (
+            message["role"],
+            message["content"],
+        )
+        for message in provider_messages[0]
+    ] == [
+        (
+            "system",
+            ai_service.SYSTEM_PROMPT,
+        ),
+        (
+            "assistant",
+            "选择器保留的历史",
+        ),
+        (
+            "user",
+            "这是当前消息",
+        ),
+    ]

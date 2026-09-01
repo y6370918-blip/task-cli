@@ -4,6 +4,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from task_cli.ai_context import (
+    HISTORY_CANDIDATE_LIMIT,
+    message_to_provider_data,
+    select_history_messages,
+)
 from task_cli.ai_exceptions import (
     AIProviderError,
     AIToolError,
@@ -18,7 +23,6 @@ from task_cli.conversation_service import (
     create_message,
     list_conversation_messages,
 )
-from task_cli.models import Message
 
 logger = logging.getLogger(__name__)
 
@@ -48,23 +52,6 @@ SYSTEM_PROMPT = """
 - 用户明确要求清除截止时间时，调用 update_task 并把 due_at 设为 null。
 - 删除属于危险操作，只能请求删除，不能直接执行删除。
 """
-
-
-def _message_to_provider_data(
-    message: Message,
-) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "role": message.role,
-        "content": message.content,
-    }
-
-    if message.tool_calls is not None:
-        data["tool_calls"] = message.tool_calls
-
-    if message.tool_call_id is not None:
-        data["tool_call_id"] = message.tool_call_id
-
-    return data
 
 
 def _persist_message(
@@ -147,14 +134,17 @@ def run_task_assistant(
     ]
 
     if conversation_id is not None:
-        history = list_conversation_messages(
+        candidates = list_conversation_messages(
             session=db,
             conversation_id=conversation_id,
             owner_id=owner_id,
+            limit=(HISTORY_CANDIDATE_LIMIT),
         )
 
+        history = select_history_messages(candidates)
+
         messages.extend(
-            _message_to_provider_data(history_message) for history_message in history
+            message_to_provider_data(history_message) for history_message in history
         )
 
     messages.append(
