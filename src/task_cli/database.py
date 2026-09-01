@@ -9,9 +9,7 @@ from task_cli.models import Base
 settings = get_settings()
 
 
-engine = create_engine(
-    settings.database_url
-    )
+engine = create_engine(settings.database_url)
 
 
 SessionLocal = sessionmaker(

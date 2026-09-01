@@ -1,7 +1,12 @@
 import time
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+)
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from task_cli.exceptions import TaskNotFoundError
@@ -9,8 +14,9 @@ from task_cli.routers import assistant, auth, tasks
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-
+async def lifespan(
+    _app: FastAPI,
+) -> AsyncIterator[None]:
     yield
 
 
@@ -32,15 +38,18 @@ async def task_not_found_handler(
 
 
 @app.get("/")
-def root():
+def root() -> dict[str, str]:
     return {"message": "Task API running"}
 
 
 @app.middleware("http")
 async def log_requests(
     request: Request,
-    call_next,
-):
+    call_next: Callable[
+        [Request],
+        Awaitable[Response],
+    ],
+) -> Response:
 
     start_time = time.time()
 

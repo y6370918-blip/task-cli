@@ -3,7 +3,7 @@ import logging
 from task_cli.config import get_settings
 
 
-def configure_logging():
+def configure_logging() -> None:
 
     settings = get_settings()
 

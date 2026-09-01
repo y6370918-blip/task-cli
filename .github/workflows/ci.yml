@@ -34,24 +34,10 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: >
-          ruff check
-          src/task_cli/exceptions.py
-          src/task_cli/schemas.py
-          src/task_cli/services.py
-          src/task_cli/routers/tasks.py
-          tests/test_api.py
-          tests/test_services.py
+        run: ruff check .
 
       - name: Ruff format check
-        run: >
-          ruff format --check
-          src/task_cli/exceptions.py
-          src/task_cli/schemas.py
-          src/task_cli/services.py
-          src/task_cli/routers/tasks.py
-          tests/test_api.py
-          tests/test_services.py
+        run: ruff format --check .
 
       - name: mypy
         run: python -m mypy

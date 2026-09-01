@@ -15,7 +15,6 @@ from task_cli.models import (
     User,
 )
 
-
 # =========================================================
 # 测试数据库
 # =========================================================
@@ -43,19 +42,16 @@ TestingSessionLocal = sessionmaker(
 # 每个测试独立数据库
 # =========================================================
 
+
 @pytest.fixture
 def db_session() -> Generator[
     Session,
     None,
     None,
 ]:
-    Base.metadata.drop_all(
-        bind=engine
-    )
+    Base.metadata.drop_all(bind=engine)
 
-    Base.metadata.create_all(
-        bind=engine
-    )
+    Base.metadata.create_all(bind=engine)
 
     session = TestingSessionLocal()
 
@@ -66,14 +62,13 @@ def db_session() -> Generator[
         session.rollback()
         session.close()
 
-        Base.metadata.drop_all(
-            bind=engine
-        )
+        Base.metadata.drop_all(bind=engine)
 
 
 # =========================================================
 # 普通 TestClient
 # =========================================================
+
 
 @pytest.fixture
 def client(
@@ -93,9 +88,7 @@ def client(
 
     app.dependency_overrides.clear()
 
-    app.dependency_overrides[
-        get_db
-    ] = override_get_db
+    app.dependency_overrides[get_db] = override_get_db
 
     try:
         with TestClient(app) as test_client:
@@ -108,6 +101,7 @@ def client(
 # =========================================================
 # 当前测试用户
 # =========================================================
+
 
 @pytest.fixture
 def user(
@@ -133,6 +127,7 @@ def user(
 # 用于 ownership / 越权测试
 # =========================================================
 
+
 @pytest.fixture
 def other_user(
     db_session: Session,
@@ -154,6 +149,7 @@ def other_user(
 # =========================================================
 # 当前用户自己的 Task
 # =========================================================
+
 
 @pytest.fixture
 def task(
@@ -179,6 +175,7 @@ def task(
 # 模拟已登录客户端
 # =========================================================
 
+
 @pytest.fixture
 def authenticated_client(
     client: TestClient,
@@ -192,9 +189,7 @@ def authenticated_client(
     def override_get_current_user() -> User:
         return user
 
-    app.dependency_overrides[
-        get_current_user
-    ] = override_get_current_user
+    app.dependency_overrides[get_current_user] = override_get_current_user
 
     try:
         yield client

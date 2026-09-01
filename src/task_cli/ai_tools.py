@@ -291,16 +291,16 @@ def execute_tool(
         # =================================================
 
         if name == "list_tasks":
-            data = ListTasksToolArguments.model_validate(arguments)
+            list_data = ListTasksToolArguments.model_validate(arguments)
 
             tasks = list_tasks(
                 session=db,
                 owner_id=owner_id,
-                status=data.status,
-                priority=data.priority,
-                overdue=data.overdue,
-                due_within_days=data.due_within_days,
-                sort=data.sort,
+                status=list_data.status,
+                priority=list_data.priority,
+                overdue=list_data.overdue,
+                due_within_days=(list_data.due_within_days),
+                sort=list_data.sort,
                 limit=_AI_TASK_LIST_LIMIT,
             )
 
@@ -332,20 +332,18 @@ def execute_tool(
                 result,
                 ensure_ascii=False,
             )
-
         # =================================================
         # create_task
         # =================================================
 
         if name == "create_task":
-            data = CreateTaskToolArguments.model_validate(arguments)
+            create_data = CreateTaskToolArguments.model_validate(arguments)
 
             task = create_task(
                 db,
-                data,
+                create_data,
                 owner_id,
             )
-
             result = {
                 "success": True,
                 "action": "create_task",
@@ -380,14 +378,14 @@ def execute_tool(
             # - task_id 必须大于 0；
             # - priority 只能是 low/medium/high；
             # - owner_id 等额外字段会被拒绝。
-            tool_data = UpdateTaskToolArguments.model_validate(arguments)
+            update_tool_data = UpdateTaskToolArguments.model_validate(arguments)
 
             # task_id 只负责定位任务，
             # 不能作为任务字段传给 Service 更新。
-            task_id = tool_data.task_id
+            task_id = update_tool_data.task_id
 
             # 排除 task_id，只保留模型实际要求修改的字段。
-            update_fields = tool_data.model_dump(
+            update_fields = update_tool_data.model_dump(
                 exclude={
                     "task_id",
                 },
@@ -400,14 +398,14 @@ def execute_tool(
                 raise AIToolError("没有提供需要修改的任务字段。")
 
             # 转换成 Service 真正需要的 TaskUpdate。
-            data = TaskUpdate.model_validate(update_fields)
+            update_data = TaskUpdate.model_validate(update_fields)
 
             # owner_id 仍然来自当前认证用户，
             # 不允许由 AI Tool 参数决定。
             task = update_task(
                 session=db,
                 task_id=task_id,
-                data=data,
+                data=update_data,
                 owner_id=owner_id,
             )
 
@@ -441,9 +439,9 @@ def execute_tool(
         # =================================================
 
         if name == "request_delete_task":
-            data = RequestDeleteTaskToolArguments.model_validate(arguments)
+            delete_data = RequestDeleteTaskToolArguments.model_validate(arguments)
 
-            task_id = data.task_id
+            task_id = delete_data.task_id
 
             get_task(
                 session=db,
