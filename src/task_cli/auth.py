@@ -12,6 +12,12 @@ from task_cli.config import (
     get_settings,
 )
 
+_MIN_JWT_SECRET_KEY_BYTES = 32
+
+_UNSAFE_JWT_SECRET_KEYS = {
+    "replace-with-a-long-random-secret",
+}
+
 
 def _require_jwt_secret_key(
     settings: Settings,
@@ -20,6 +26,12 @@ def _require_jwt_secret_key(
 
     if secret_key is None:
         raise RuntimeError("未配置 JWT_SECRET_KEY")
+
+    if (
+        secret_key in _UNSAFE_JWT_SECRET_KEYS
+        or len(secret_key.encode("utf-8")) < _MIN_JWT_SECRET_KEY_BYTES
+    ):
+        raise RuntimeError("JWT_SECRET_KEY 配置不安全")
 
     return secret_key
 

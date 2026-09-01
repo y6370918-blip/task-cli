@@ -175,6 +175,38 @@ def test_ai_tool_list_tasks_accepts_valid_status(
     assert result["tasks"][0]["id"] == task.id
 
 
+def test_ai_tool_list_tasks_limits_result_size(
+    db_session: Session,
+    user: User,
+) -> None:
+    db_session.add_all(
+        [
+            Task(
+                title=f"批量任务 {index}",
+                description=None,
+                status="pending",
+                priority="medium",
+                owner_id=user.id,
+            )
+            for index in range(101)
+        ]
+    )
+    db_session.commit()
+
+    raw_result = execute_tool(
+        name="list_tasks",
+        arguments={},
+        db=db_session,
+        owner_id=user.id,
+    )
+
+    result = json.loads(raw_result)
+
+    assert result["success"] is True
+    assert result["count"] == 100
+    assert len(result["tasks"]) == 100
+
+
 def test_list_tasks_tool_declares_priority_enum() -> None:
     list_tasks_tool = next(
         tool for tool in TOOLS if tool["function"]["name"] == "list_tasks"

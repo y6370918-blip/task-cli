@@ -9,7 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import task_cli.ai_service as ai_service
-from task_cli.ai_exceptions import AIProviderConnectionError, AIProviderError
+from task_cli.ai_exceptions import (
+    AIProviderConnectionError,
+    AIProviderError,
+    AIToolError,
+)
 from task_cli.conversation_service import (
     create_conversation,
     create_message,
@@ -832,3 +836,68 @@ def test_assistant_uses_safe_history_selector(
             "这是当前消息",
         ),
     ]
+
+
+def test_tool_failure_log_does_not_expose_error_detail(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sensitive_error_detail = "不能写入日志的私人任务标题"
+
+    responses = iter(
+        [
+            make_tool_response(
+                call_id="call-sensitive-error-1",
+                name="list_tasks",
+                arguments={},
+            ),
+            make_text_response("工具调用失败，请检查任务条件。"),
+        ]
+    )
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        return next(responses)
+
+    def failing_execute_tool(
+        **kwargs: object,
+    ) -> str:
+        raise AIToolError(f"工具参数验证失败：{sensitive_error_detail}")
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+    monkeypatch.setattr(
+        ai_service,
+        "execute_tool",
+        failing_execute_tool,
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="task_cli.ai_service",
+    ):
+        ai_service.run_task_assistant(
+            db=db_session,
+            owner_id=user.id,
+            message="查询我的私人任务",
+        )
+
+    service_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "task_cli.ai_service"
+    ]
+
+    assert sensitive_error_detail not in caplog.text
+    assert (
+        f"AI tool failed "
+        f"name=list_tasks "
+        f"owner_id={user.id} "
+        f"error_type=AIToolError" in service_messages
+    )

@@ -12,7 +12,7 @@ from task_cli.auth_dependencies import (
 )
 from task_cli.models import User
 
-TEST_SECRET_KEY = "test-jwt-secret-key-for-day25"
+TEST_SECRET_KEY = "test-jwt-secret-key-for-day25-at-least-32-bytes"
 
 
 def _configure_jwt(
@@ -75,7 +75,7 @@ def test_decode_rejects_wrong_secret(
 ) -> None:
     _configure_jwt(
         monkeypatch,
-        secret_key=("first-test-secret-key"),
+        secret_key=("first-test-secret-key-that-is-long-enough"),
     )
 
     token = create_access_token(
@@ -86,7 +86,7 @@ def test_decode_rejects_wrong_secret(
 
     monkeypatch.setenv(
         "JWT_SECRET_KEY",
-        "different-test-secret-key",
+        "different-test-secret-key-that-is-long-enough",
     )
 
     with pytest.raises(JWTError):
@@ -167,4 +167,31 @@ def test_get_current_user_preserves_missing_secret_error(
         get_current_user(
             token="any-token",
             db=db_session,
+        )
+
+
+@pytest.mark.parametrize(
+    "unsafe_secret",
+    [
+        "short-secret",
+        ("replace-with-a-long-random-secret"),
+    ],
+)
+def test_create_access_token_rejects_unsafe_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_secret: str,
+) -> None:
+    monkeypatch.setenv(
+        "JWT_SECRET_KEY",
+        unsafe_secret,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="JWT_SECRET_KEY 配置不安全",
+    ):
+        create_access_token(
+            {
+                "user_id": 123,
+            }
         )

@@ -108,7 +108,7 @@ def test_registered_user_can_login(
 ) -> None:
     monkeypatch.setenv(
         "JWT_SECRET_KEY",
-        "test-secret-key-for-day26",
+        "test-secret-key-for-day26-at-least-32-bytes",
     )
 
     register_response = client.post(

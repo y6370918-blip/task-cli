@@ -1,7 +1,7 @@
 from datetime import (
+    UTC,
     datetime,
     timedelta,
-    timezone,
 )
 
 from sqlalchemy import select
@@ -20,6 +20,7 @@ from task_cli.models import (
     Task,
 )
 
+
 def ensure_utc(
     value: datetime,
 ) -> datetime:
@@ -31,13 +32,10 @@ def ensure_utc(
     """
 
     if value.tzinfo is None:
-        return value.replace(
-            tzinfo=timezone.utc
-        )
+        return value.replace(tzinfo=UTC)
 
-    return value.astimezone(
-        timezone.utc
-    )
+    return value.astimezone(UTC)
+
 
 def create_pending_action(
     session: Session,
@@ -46,15 +44,8 @@ def create_pending_action(
     payload: dict,
     expires_minutes: int = 10,
 ) -> PendingAction:
-    print(
-        "ACTION DB:",
-        session.get_bind().url.render_as_string(
-        hide_password=True
-        ),
-    )
-    now = datetime.now(
-        timezone.utc
-    )
+
+    now = datetime.now(UTC)
 
     pending_action = PendingAction(
         owner_id=owner_id,
@@ -62,24 +53,16 @@ def create_pending_action(
         payload=payload,
         status="pending",
         created_at=now,
-        expires_at=(
-            now
-            + timedelta(
-                minutes=expires_minutes
-            )
-        ),
+        expires_at=(now + timedelta(minutes=expires_minutes)),
     )
 
-    session.add(
-        pending_action
-    )
+    session.add(pending_action)
 
     session.commit()
-    session.refresh(
-        pending_action
-    )
+    session.refresh(pending_action)
 
     return pending_action
+
 
 def confirm_pending_action(
     session: Session,
@@ -87,89 +70,57 @@ def confirm_pending_action(
     owner_id: int,
 ) -> PendingAction:
 
-    statement = select(
-        PendingAction
-    ).where(
+    statement = select(PendingAction).where(
         PendingAction.id == action_id,
         PendingAction.owner_id == owner_id,
     )
 
-    pending_action = session.scalar(
-        statement
-    )
+    pending_action = session.scalar(statement)
 
     if pending_action is None:
-        raise PendingActionNotFoundError(
-            f"操作 {action_id} 不存在"
-        )
+        raise PendingActionNotFoundError(f"操作 {action_id} 不存在")
 
     if pending_action.status != "pending":
-        raise PendingActionAlreadyHandledError(
-            f"操作 {action_id} 已经被处理"
-        )
+        raise PendingActionAlreadyHandledError(f"操作 {action_id} 已经被处理")
 
-    now = datetime.now(
-        timezone.utc
-    )
+    now = datetime.now(UTC)
 
-    expires_at = ensure_utc(
-    pending_action.expires_at
-)
+    expires_at = ensure_utc(pending_action.expires_at)
 
     if expires_at < now:
-
         pending_action.status = "expired"
 
         session.commit()
 
-        raise PendingActionExpiredError(
-            f"操作 {action_id} 已经过期"
-        )
+        raise PendingActionExpiredError(f"操作 {action_id} 已经过期")
 
     if pending_action.action == "delete_task":
+        task_id = pending_action.payload["task_id"]
 
-        task_id = pending_action.payload[
-            "task_id"
-        ]
-
-        task_statement = select(
-            Task
-        ).where(
+        task_statement = select(Task).where(
             Task.id == task_id,
             Task.owner_id == owner_id,
         )
 
-        task = session.scalar(
-            task_statement
-        )
+        task = session.scalar(task_statement)
 
         if task is None:
-            raise TaskNotFoundError(
-                task_id
-            )
+            raise TaskNotFoundError(task_id)
 
-        session.delete(
-            task
-        )
+        session.delete(task)
 
-        pending_action.status = (
-            "confirmed"
-        )
+        pending_action.status = "confirmed"
 
         pending_action.completed_at = now
 
         session.commit()
 
-        session.refresh(
-            pending_action
-        )
+        session.refresh(pending_action)
 
         return pending_action
 
-    raise ValueError(
-        f"不支持的 action: "
-        f"{pending_action.action}"
-    )
+    raise ValueError(f"不支持的 action: {pending_action.action}")
+
 
 def cancel_pending_action(
     session: Session,
@@ -177,56 +128,35 @@ def cancel_pending_action(
     owner_id: int,
 ) -> PendingAction:
 
-    statement = select(
-        PendingAction
-    ).where(
+    statement = select(PendingAction).where(
         PendingAction.id == action_id,
         PendingAction.owner_id == owner_id,
     )
 
-    pending_action = session.scalar(
-        statement
-    )
+    pending_action = session.scalar(statement)
 
     if pending_action is None:
-        raise PendingActionNotFoundError(
-            f"操作 {action_id} 不存在"
-        )
+        raise PendingActionNotFoundError(f"操作 {action_id} 不存在")
 
     if pending_action.status != "pending":
-        raise PendingActionAlreadyHandledError(
-            f"操作 {action_id} 已经被处理"
-        )
+        raise PendingActionAlreadyHandledError(f"操作 {action_id} 已经被处理")
 
-    now = datetime.now(
-        timezone.utc
-    )
+    now = datetime.now(UTC)
 
-    expires_at = ensure_utc(
-        pending_action.expires_at
-    )
+    expires_at = ensure_utc(pending_action.expires_at)
 
     if expires_at < now:
         pending_action.status = "expired"
 
         session.commit()
 
-        raise PendingActionExpiredError(
-            f"操作 {action_id} 已经过期"
-        )
+        raise PendingActionExpiredError(f"操作 {action_id} 已经过期")
 
     pending_action.status = "cancelled"
 
     pending_action.completed_at = now
 
     session.commit()
-    session.refresh(
-        pending_action
-    )
-    print(
-        "PENDING ACTION CREATED:",
-        pending_action.id,
-        pending_action.owner_id,
-        pending_action.action,
-)
+    session.refresh(pending_action)
+
     return pending_action

@@ -18,6 +18,7 @@ from task_cli.schemas_ai import (
 )
 from task_cli.services import create_task, get_task, list_tasks, update_task
 
+_AI_TASK_LIST_LIMIT = 100
 # =========================================================
 # DeepSeek 可以使用的工具定义
 # =========================================================
@@ -32,6 +33,7 @@ TOOLS = [
             "name": "list_tasks",
             "description": (
                 "查询当前登录用户自己的任务。"
+                "单次最多返回 100 条任务。"
                 "可以按状态、优先级或是否逾期或即将到期过滤。"
                 "也可以按截止时间排序。"
                 "当用户询问自己的任务、待办事项、"
@@ -299,6 +301,7 @@ def execute_tool(
                 overdue=data.overdue,
                 due_within_days=data.due_within_days,
                 sort=data.sort,
+                limit=_AI_TASK_LIST_LIMIT,
             )
 
             result = {

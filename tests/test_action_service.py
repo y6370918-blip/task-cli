@@ -40,6 +40,31 @@ def test_create_pending_action(
     assert action.expires_at is not None
 
 
+def test_action_service_does_not_print_debug_output(
+    db_session: Session,
+    user: User,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = create_pending_action(
+        session=db_session,
+        owner_id=user.id,
+        action="delete_task",
+        payload={
+            "task_id": 10,
+        },
+    )
+
+    cancel_pending_action(
+        session=db_session,
+        action_id=action.id,
+        owner_id=user.id,
+    )
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+
+
 def test_confirm_delete_task(
     db_session: Session,
     user: User,

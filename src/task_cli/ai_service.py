@@ -311,10 +311,10 @@ def run_task_assistant(
 
             except AIToolError as exc:
                 logger.warning(
-                    ("AI tool failed name=%s owner_id=%s error=%s"),
+                    "AI tool failed name=%s owner_id=%s error_type=%s",
                     tool_name,
                     owner_id,
-                    exc,
+                    type(exc).__name__,
                 )
 
                 tool_result = json.dumps(
