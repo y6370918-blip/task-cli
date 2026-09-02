@@ -17,6 +17,28 @@ jobs:
   quality-and-tests:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: task_test_user
+          POSTGRES_PASSWORD: task_test_password
+          POSTGRES_DB: task_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd
+          "pg_isready -U task_test_user -d task_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: >-
+        postgresql+psycopg2://task_test_user:task_test_password@localhost:5432/task_test
+      TEST_POSTGRES_URL: >-
+        postgresql+psycopg2://task_test_user:task_test_password@localhost:5432/task_test
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -32,6 +54,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+
+      - name: Upgrade empty PostgreSQL database
+        run: python -m alembic upgrade head
+
+      - name: Verify PostgreSQL migration head
+        run: python -m alembic current --check-heads
+
+      - name: Check models and migrations are in sync
+        run: python -m alembic check
 
       - name: Ruff lint
         run: ruff check .
