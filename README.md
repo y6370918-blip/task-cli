@@ -16,24 +16,34 @@ task_cli.api:app
 
 ## Current Features
 
-- 用户注册和密码登录
+- 用户注册、密码哈希和 OAuth2 表单登录
 - JWT Bearer Authentication
+- JWT 密钥安全检查和用户身份二次查询
 - 不同用户之间的任务数据隔离
 - 创建、查询、更新和删除任务
 - 任务状态：`pending`、`doing`、`done`
 - 任务优先级：`low`、`medium`、`high`
 - 支持带时区的截止时间
-- 按状态和优先级过滤
+- 状态、优先级和逾期任务过滤
+- 即将到期任务查询和截止时间排序
 - `limit` 和 `offset` 分页
 - DeepSeek Tool Calling
 - AI 查询、创建和修改任务
 - AI 删除任务前创建待确认操作
+- AI Provider 超时、有限重试和错误分类
+- AI 调用耗时和 Token 使用量日志
+- 持久化 Conversation 和 Message
+- 受预算限制的多轮对话上下文
 - PostgreSQL 数据持久化
 - Alembic 数据库迁移
-- pytest 自动化测试
+- SQLite 快速测试和 PostgreSQL 集成测试
+- Ruff 全仓库检查和完整源码 mypy 检查
+- pre-commit 和 pre-push 本地检查
+- GitHub Actions CI 配置
 - Docker Compose 本地运行环境
-- pre-commit 本地检查
-- GitHub Actions 持续集成
+- 非 root API 容器
+- Liveness 和 Readiness 健康检查
+- 数据库备份、恢复演练和发布检查手册
 
 ## Architecture
 
@@ -41,14 +51,20 @@ task_cli.api:app
 flowchart LR
     Client[API Client] --> FastAPI[FastAPI Application]
 
+    FastAPI --> Health[Health Checks]
     FastAPI --> Auth[JWT Authentication]
     FastAPI --> TaskRouter[Task Router]
     FastAPI --> AssistantRouter[Assistant Router]
 
     Auth --> DatabaseLayer[SQLAlchemy Session]
+    Health --> DatabaseLayer
     TaskRouter --> TaskService[Task Service]
 
+    AssistantRouter --> ConversationService[Conversation Service]
     AssistantRouter --> AIService[AI Service]
+
+    AIService --> ContextSelector[AI Context Selector]
+    ContextSelector --> ConversationService
     AIService <--> DeepSeek[DeepSeek API]
     AIService --> ToolExecutor[Validated Tool Executor]
 
@@ -57,6 +73,7 @@ flowchart LR
 
     TaskService --> DatabaseLayer
     ActionService --> DatabaseLayer
+    ConversationService --> DatabaseLayer
     DatabaseLayer --> PostgreSQL[(PostgreSQL)]
 ```
 
@@ -75,34 +92,39 @@ HTTP Request
 → Response Model
 ```
 
-AI 请求：
-
-```text
 User Message
 → Assistant Router
-→ AI Service
+→ JWT User Identity
+→ Create or Load Owned Conversation
+→ Load Limited Conversation History
+→ Preserve Complete Tool Protocol Blocks
+→ Apply Message and Estimated Token Budgets
 → DeepSeek Tool Call
 → JSON Parsing
 → Pydantic Tool Argument Validation
 → Inject current_user.id
 → Existing Service
-→ Database
-→ Assistant Response
-```
+→ PostgreSQL
+→ Persist Message History
+→ Assistant Response with conversation_id
 
 ## Layer Responsibilities
 
-| Layer                  | Responsibility                                 |
-| ---------------------- | ---------------------------------------------- |
-| Router                 | 接收 HTTP 请求、解析依赖、选择状态码和响应模型 |
-| Authentication         | 解码 JWT，并从数据库确认当前用户仍然存在       |
-| Schema                 | 验证 API 输入、输出以及 AI Tool 参数           |
-| Service                | 执行业务规则和数据库事务                       |
-| ORM Model              | 描述数据库表及其关系                           |
-| AI Service             | 管理模型消息、Tool Call 和最大调用轮数         |
-| AI Tools               | 验证模型参数，并把操作转交给现有 Service       |
-| Pending Action Service | 管理危险操作的确认、取消和过期状态             |
-| Alembic                | 管理 PostgreSQL 数据库结构变更                 |
+| Layer                  | Responsibility                                      |
+| ---------------------- | --------------------------------------------------- |
+| Router                 | 接收 HTTP 请求、解析依赖、选择状态码和响应模型      |
+| Health Check           | 区分应用存活和数据库就绪状态                        |
+| Authentication         | 解码 JWT，并从数据库确认当前用户仍然存在            |
+| Schema                 | 验证 API 输入、输出以及 AI Tool 参数                |
+| Service                | 执行业务规则和数据库事务                            |
+| ORM Model              | 描述数据库表、关系和约束                            |
+| Conversation Service   | 管理用户会话和持久化消息历史                        |
+| AI Context             | 按消息数量、估算预算和 Tool 协议块选择历史          |
+| AI Service             | 管理模型消息、Tool Call、持久化和最大调用轮数       |
+| AI Provider            | 调用 DeepSeek，处理超时、重试、错误分类和使用量日志 |
+| AI Tools               | 验证模型参数，并把操作转交给现有 Service            |
+| Pending Action Service | 管理危险操作的确认、取消和过期状态                  |
+| Alembic                | 管理 PostgreSQL 数据库结构变更                      |
 
 ## Security Boundaries
 
@@ -119,33 +141,35 @@ User Message
 
 ## Project Structure
 
-```text
 task-cli/
 ├── src/task_cli/
-│   ├── api.py                  # FastAPI 应用入口
-│   ├── routers/                # HTTP 路由层
-│   ├── schemas.py              # Task API Schema
-│   ├── schemas_user.py         # User Schema
-│   ├── schemas_ai.py           # Assistant Schema
-│   ├── models.py               # SQLAlchemy ORM Models
-│   ├── services.py             # Task 业务逻辑
-│   ├── user_service.py         # User 业务逻辑
-│   ├── action_service.py       # 待确认操作业务逻辑
-│   ├── auth.py                 # JWT 创建和解码
-│   ├── auth_dependencies.py    # 当前登录用户依赖
-│   ├── security.py             # 密码哈希和验证
-│   ├── ai_service.py           # AI 对话和 Tool Call 流程
-│   ├── ai_tools.py             # AI 工具定义与执行
-│   ├── ai_provider.py          # DeepSeek Provider 调用
-│   ├── database.py             # Engine 和 Session
-│   └── config.py               # 环境配置
-├── alembic/                    # 数据库迁移
-├── tests/                      # 自动化测试
-├── .github/workflows/ci.yml    # GitHub Actions CI
+│ ├── api.py # FastAPI 应用和健康检查
+│ ├── routers/ # HTTP 路由层
+│ ├── schemas.py # Task API Schema
+│ ├── schemas_user.py # User Schema
+│ ├── schemas_ai.py # Assistant 和 Conversation Schema
+│ ├── models.py # SQLAlchemy ORM Models
+│ ├── services.py # Task 业务逻辑
+│ ├── user_service.py # User 业务逻辑
+│ ├── conversation_service.py # 会话和消息持久化
+│ ├── action_service.py # 待确认操作业务逻辑
+│ ├── auth.py # JWT 创建、解码和密钥检查
+│ ├── auth_dependencies.py # 当前登录用户依赖
+│ ├── security.py # 密码哈希和验证
+│ ├── ai_client.py # DeepSeek Client 配置
+│ ├── ai_context.py # 历史上下文预算与协议块选择
+│ ├── ai_service.py # AI 对话和 Tool Call 流程
+│ ├── ai_tools.py # AI 工具定义与执行
+│ ├── ai_provider.py # Provider 调用、错误分类和日志
+│ ├── database.py # Engine 和 Session
+│ └── config.py # 应用环境配置
+├── alembic/ # 数据库迁移
+├── tests/ # SQLite 和 PostgreSQL 测试
+├── docs/operations.md # 运维、备份、恢复和发布手册
+├── .github/workflows/ci.yml # GitHub Actions CI 配置
 ├── Dockerfile
 ├── docker-compose.yml
 └── pyproject.toml
-```
 
 ## Tech Stack
 
@@ -174,24 +198,30 @@ if (-not (Test-Path .env)) {
 }
 ```
 
-| Variable                      | Purpose                   | Example                     |
-| ----------------------------- | ------------------------- | --------------------------- |
-| `POSTGRES_USER`               | PostgreSQL 用户名         | `task_user`                 |
-| `POSTGRES_PASSWORD`           | PostgreSQL 密码           | `task_password`             |
-| `POSTGRES_DB`                 | PostgreSQL 数据库名称     | `task_db`                   |
-| `DATABASE_URL`                | SQLAlchemy 数据库连接地址 | `postgresql+psycopg2://...` |
-| `LOG_LEVEL`                   | 应用日志级别              | `INFO`                      |
-| `JWT_SECRET_KEY`              | JWT 签名密钥              | 使用随机长字符串            |
-| `JWT_ALGORITHM`               | JWT 签名算法              | `HS256`                     |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效分钟数   | `30`                        |
-| `DEEPSEEK_API_KEY`            | DeepSeek API Key          | 不要提交到 Git              |
-| `DEEPSEEK_MODEL`              | DeepSeek 模型名称         | `deepseek-v4-flash`         |
+| Variable                      | Purpose                       | Example                     |
+| ----------------------------- | ----------------------------- | --------------------------- |
+| `POSTGRES_USER`               | PostgreSQL 用户名             | `task_user`                 |
+| `POSTGRES_PASSWORD`           | PostgreSQL 密码，必须显式配置 | 使用 URL-safe 随机字符串    |
+| `POSTGRES_DB`                 | PostgreSQL 数据库名称         | `task_db`                   |
+| `DATABASE_URL`                | 宿主机 SQLAlchemy 连接地址    | `postgresql+psycopg2://...` |
+| `LOG_LEVEL`                   | 应用日志级别                  | `INFO`                      |
+| `JWT_SECRET_KEY`              | JWT 签名密钥                  | 使用随机长字符串            |
+| `JWT_ALGORITHM`               | JWT 签名算法                  | `HS256`                     |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效分钟数       | `30`                        |
+| `DEEPSEEK_API_KEY`            | DeepSeek API Key              | 不要提交到 Git              |
+| `DEEPSEEK_MODEL`              | DeepSeek 模型名称             | `deepseek-v4-flash`         |
+| `DEEPSEEK_TIMEOUT_SECONDS`    | 单次 Provider 请求超时秒数    | `30`                        |
+| `DEEPSEEK_MAX_RETRIES`        | SDK 自动重试次数，范围 0～5   | `2`                         |
 
 生成 JWT Secret：
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
+
+`.env.example` 中的密码和密钥是占位符，不能直接作为正式配置。
+
+对于已经初始化的 PostgreSQL Volume，只修改 `.env` 不会自动修改数据库内部密码。密码轮换需要同步执行数据库用户密码变更，不能通过删除 Volume 完成。
 
 把输出结果手动写入 `.env` 的 `JWT_SECRET_KEY`。
 
@@ -337,40 +367,59 @@ docker compose down -v
 Authorization: Bearer <access_token>
 ```
 
-| Method   | Path                                     | Authentication | Purpose                    |
-| -------- | ---------------------------------------- | -------------- | -------------------------- |
-| `GET`    | `/`                                      | No             | API 健康检查               |
-| `POST`   | `/auth/register`                         | No             | 注册用户                   |
-| `POST`   | `/auth/login`                            | No             | 登录并签发 JWT             |
-| `POST`   | `/tasks/`                                | Yes            | 创建任务                   |
-| `GET`    | `/tasks/`                                | Yes            | 查询当前用户的任务         |
-| `GET`    | `/tasks/{task_id}`                       | Yes            | 查询当前用户的一项任务     |
-| `PUT`    | `/tasks/{task_id}`                       | Yes            | 更新当前用户的一项任务     |
-| `DELETE` | `/tasks/{task_id}`                       | Yes            | 立即删除当前用户的一项任务 |
-| `POST`   | `/assistant/`                            | Yes            | 使用自然语言管理任务       |
-| `POST`   | `/assistant/actions/{action_id}/confirm` | Yes            | 确认并执行待确认操作       |
-| `POST`   | `/assistant/actions/{action_id}/cancel`  | Yes            | 取消待确认操作             |
+| Method   | Path                                                  | Authentication | Purpose                    |
+| -------- | ----------------------------------------------------- | -------------- | -------------------------- |
+| `GET`    | `/`                                                   | No             | 返回 API 运行信息          |
+| `GET`    | `/health/live`                                        | No             | 检查 FastAPI 进程存活      |
+| `GET`    | `/health/ready`                                       | No             | 检查 API 和数据库就绪      |
+| `POST`   | `/auth/register`                                      | No             | 注册用户                   |
+| `POST`   | `/auth/login`                                         | No             | 登录并签发 JWT             |
+| `POST`   | `/tasks/`                                             | Yes            | 创建任务                   |
+| `GET`    | `/tasks/`                                             | Yes            | 查询当前用户的任务         |
+| `GET`    | `/tasks/{task_id}`                                    | Yes            | 查询当前用户的一项任务     |
+| `PUT`    | `/tasks/{task_id}`                                    | Yes            | 更新当前用户的一项任务     |
+| `DELETE` | `/tasks/{task_id}`                                    | Yes            | 立即删除当前用户的一项任务 |
+| `POST`   | `/assistant/`                                         | Yes            | 开始或继续 AI 会话         |
+| `GET`    | `/assistant/conversations`                            | Yes            | 查询当前用户的会话         |
+| `GET`    | `/assistant/conversations/{conversation_id}/messages` | Yes            | 查询会话可见消息           |
+| `POST`   | `/assistant/actions/{action_id}/confirm`              | Yes            | 确认并执行待确认操作       |
+| `POST`   | `/assistant/actions/{action_id}/cancel`               | Yes            | 取消待确认操作             |
 
 ### Task Query Parameters
 
 `GET /tasks/` 支持：
 
-| Parameter  | Type                       | Default | Description        |
-| ---------- | -------------------------- | ------- | ------------------ |
-| `status`   | `pending`, `doing`, `done` | None    | 按任务状态过滤     |
-| `priority` | `low`, `medium`, `high`    | None    | 按优先级过滤       |
-| `limit`    | Integer, `1..100`          | `20`    | 每次最多返回多少项 |
-| `offset`   | Integer, `>= 0`            | `0`     | 跳过多少项         |
+| Parameter         | Type                       | Default | Description                        |
+| ----------------- | -------------------------- | ------- | ---------------------------------- |
+| `status`          | `pending`, `doing`, `done` | None    | 按任务状态过滤                     |
+| `priority`        | `low`, `medium`, `high`    | None    | 按优先级过滤                       |
+| `overdue`         | Boolean                    | `false` | 查询截止时间已过且尚未完成的任务   |
+| `due_within_days` | Integer, `1..365`          | None    | 查询指定天数内到期且尚未完成的任务 |
+| `sort`            | `due_at`                   | None    | 按截止时间升序，空截止时间排在最后 |
+| `limit`           | Integer, `1..100`          | `20`    | 每次最多返回多少项                 |
+| `offset`          | Integer, `>= 0`            | `0`     | 跳过多少项                         |
 
-没有提供过滤条件时，会查询当前用户自己的全部任务，再应用分页。
+所有权过滤、业务过滤、排序和分页都在 SQL 查询中完成。
 
-## PowerShell API Example
-
-以下示例假设 API 正在运行：
+逾期条件为：
 
 ```text
-http://127.0.0.1:8000
+due_at < 当前 UTC 时间
+AND status != done
 ```
+
+即将到期条件为：
+
+```text
+当前 UTC 时间 <= due_at <= 当前时间 + due_within_days
+AND status != done
+```
+
+`overdue=true` 与 `due_within_days` 表示互斥的时间范围，同时使用时通常得到空结果。
+
+没有提供排序时按任务 `id` 排序；使用 `sort=due_at` 时，没有截止时间的任务排在最后，相同截止时间再按 `id` 排序。
+
+## PowerShell API Example
 
 ### 1. Register
 
@@ -510,9 +559,38 @@ due_at = null    → 清除原截止时间
 
 ### 6. Use AI Assistant
 
+第一次请求不提供 `conversation_id`，服务器会创建当前用户的新会话：
+
 ```powershell
 $assistantBody = @{
     message = "列出我的高优先级任务"
+} | ConvertTo-Json
+
+$assistant = Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/assistant/" `
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $assistantBody
+
+$assistant
+```
+
+Assistant 返回：
+
+```json
+{
+  "conversation_id": 1,
+  "reply": "AI 根据真实任务数据生成的回答"
+}
+```
+
+继续同一个会话时，把返回的 `conversation_id` 放入下一次请求：
+
+```powershell
+$continueBody = @{
+    message = "只保留其中即将到期的任务"
+    conversation_id = $assistant.conversation_id
 } | ConvertTo-Json
 
 Invoke-RestMethod `
@@ -520,18 +598,30 @@ Invoke-RestMethod `
     -Uri "http://127.0.0.1:8000/assistant/" `
     -Headers $headers `
     -ContentType "application/json" `
-    -Body $assistantBody
+    -Body $continueBody
 ```
 
-Assistant 接口返回：
+查询当前用户的会话：
 
-```json
-{
-  "reply": "AI 根据真实任务数据生成的回答"
-}
+```powershell
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://127.0.0.1:8000/assistant/conversations" `
+    -Headers $headers
 ```
 
-使用 Assistant 需要配置有效的 `DEEPSEEK_API_KEY`。Provider 不可用时，接口返回 `503 Service Unavailable`。
+查询指定会话中用户可见的消息：
+
+```powershell
+Invoke-RestMethod `
+    -Method Get `
+    -Uri "http://127.0.0.1:8000/assistant/conversations/$($assistant.conversation_id)/messages" `
+    -Headers $headers
+```
+
+消息接口只返回带文本内容的 `user` 和 `assistant` 消息，不暴露内部 Tool Call 与 Tool Result。
+
+使用 Assistant 需要有效的 `DEEPSEEK_API_KEY`。Provider 不可用时返回 `503 Service Unavailable`。
 
 ### 7. Confirm AI Delete Request
 
@@ -569,17 +659,41 @@ Invoke-RestMethod `
 
 ## Tests
 
-运行完整测试：
+运行默认测试：
 
 ```powershell
 python -m pytest -q
 ```
 
-当前测试主要使用内存 SQLite，从而避免污染本地 PostgreSQL 数据库。但 SQLite 与 PostgreSQL 并不完全相同，因此 Docker/PostgreSQL 验证仍然有必要。
+默认业务测试使用内存 SQLite，以获得较快的速度和测试隔离。
+
+PostgreSQL 集成测试只有在明确配置专用测试数据库时才运行：
+
+```powershell
+$env:TEST_POSTGRES_URL = "postgresql+psycopg2://<user>:<password>@localhost:5432/task_test"
+python -m pytest tests/test_postgres_integration.py -q
+```
+
+`TEST_POSTGRES_URL` 的数据库名称必须包含 `test`，不能指向开发数据库或生产数据库。
+
+PostgreSQL 集成测试验证：
+
+- 连接的确是 PostgreSQL；
+- 数据库 revision 等于代码 head；
+- 真实数据库包含关键表；
+- 关键外键和检查约束存在；
+- PostgreSQL 返回带时区的当前时间。
 
 ## Code Quality
 
-运行当前配置范围内的 mypy：
+完整 Ruff 检查：
+
+```powershell
+ruff check .
+ruff format --check .
+```
+
+完整源码 mypy 检查：
 
 ```powershell
 python -m mypy
@@ -592,60 +706,81 @@ python -m pre_commit install
 python -m pre_commit install --hook-type pre-push
 ```
 
-项目目前采用渐进式质量检查策略：
+手动运行所有 commit 阶段 Hook：
 
-- pytest 运行完整测试集；
-- mypy 检查 `pyproject.toml` 中指定的核心文件；
-- CI 中的 Ruff 检查指定的核心文件；
-- 完整仓库的 Ruff 和 mypy 覆盖仍在逐步扩展。
+```powershell
+python -m pre_commit run --all-files
+```
 
-本地 Hook 可以被 `--no-verify` 跳过，因此 GitHub Actions 仍然是远程仓库的独立质量门禁。
+手动运行 pre-push pytest：
+
+```powershell
+python -m pre_commit run pytest --hook-stage pre-push --all-files
+```
+
+本地 Hook 可以通过 `--no-verify` 跳过，因此远程 CI 仍然是独立质量门禁。
+
+## Operations
+
+启动、健康检查、迁移、备份、恢复和发布验收流程见：
+
+```text
+docs/operations.md
+```
+
+数据库备份必须保存在仓库外，不能提交到 Git。
 
 ## Known Limitations
 
 - 当前没有前端界面，主要通过 Swagger UI 或 API Client 使用。
-- Assistant 请求之间没有保存对话历史，每次 HTTP 请求都会重新创建消息列表。
-- Assistant 返回的待确认操作 ID 位于自然语言 `reply` 中，没有独立的结构化字段。
-- 项目没有向模型提供用户时区和服务器当前时间，因此不能可靠处理“明天下午三点”等相对时间。
-- AI 删除任务需要确认，但直接调用 REST `DELETE` 接口会立即删除任务。
-- 自动化测试主要使用 SQLite，尚未建立完整的 PostgreSQL 集成测试。
-- DeepSeek Provider 尚未实现项目级重试、退避和 Token 使用量监控。
-- Ruff 和 mypy 目前采用渐进式覆盖，尚未覆盖全部历史文件。
-- 当前没有管理后台、密码重置、Refresh Token 或角色权限系统。
-
-这些限制用于描述项目当前真实边界，不代表已有代码承诺了尚未实现的功能。
+- Assistant 返回的待确认操作 ID 位于自然语言 `reply` 中，没有独立结构化字段。
+- 项目没有用户时区和可靠的相对时间解析，不能保证正确处理“明天下午三点”。
+- AI 删除任务需要确认，但 REST `DELETE` 当前仍然立即删除。
+- 会话上下文采用消息数和 UTF-8 字节估算预算，不是 DeepSeek 官方精确 Tokenizer。
+- 当前没有 API 级限流。
+- 当前没有 Refresh Token、安全登出、密码重置或角色权限系统。
+- 当前没有集中式日志、指标和告警平台。
+- Docker Compose 启动时自动迁移，只适合当前单实例。
+- Python 依赖尚未使用完整 lock file 固定所有传递依赖。
+- 当前没有公网托管平台、域名和 TLS。
+- Git remote 尚未配置，因此远程 GitHub Actions 和 GitHub Release 尚未验证。
 
 ## Roadmap
 
-后续开发继续采用产品问题驱动的方式，每次只解决一个明确问题。
+后续继续采用产品问题驱动的方式，每次只解决一个明确问题。
 
 ### Near-term
 
-- 返回结构化的 Assistant Action 信息
-- 为相对日期提供明确的当前时间和时区上下文
-- 增加 Assistant 对话历史
-- 增加 PostgreSQL 集成测试
-- 改善 AI Provider 错误处理、重试和可观测性
-- 逐步扩大 Ruff 和 mypy 检查范围
+- 返回结构化的 Assistant Action 信息；
+- 增加用户时区和受控的相对日期解析；
+- 为 API 增加适度限流；
+- 配置真实远程仓库并验证 CI；
+- 选择托管平台完成公网部署。
 
-### Possible Future Improvements
+### Frontend Phase
 
-- Refresh Token 和安全登出
-- 用户修改密码和密码重置
-- 角色及权限控制
-- 任务标签和排序
-- 前端 Web 界面
-- 部署到公开环境
-- API 限流和生产级日志监控
+下一阶段将在当前仓库中增加独立的 `frontend/`：
 
-Roadmap 只表示可能的演进方向，不表示这些功能已经实现。
+- TypeScript 和 React/Next.js；
+- 类型安全的 API Client；
+- 注册、登录和认证状态；
+- 任务列表、过滤、排序和分页；
+- 创建、更新和删除确认；
+- AI Assistant 会话界面；
+- 前后端测试和部署。
+
+### Future AI Project
+
+RAG、文档解析、Embedding、pgvector 和异步任务不会全部塞进 task-cli。
+
+这些能力更适合后续独立作品“智能文档工作台”，以保持 task-cli 的产品边界清晰。
 
 ## Development Status
 
-当前项目已经完成从本地命令行程序到多用户 AI Web API 的主要演进：
+当前项目已经完成以下演进：
 
 ```text
-CLI
+CLI Learning Project
 → SQLAlchemy Persistence
 → FastAPI REST API
 → PostgreSQL and Alembic
@@ -653,7 +788,18 @@ CLI
 → User Data Isolation
 → DeepSeek Tool Calling
 → Confirmed Dangerous Actions
-→ Automated Tests
-→ Docker Compose
-→ pre-commit and GitHub Actions
+→ Task Priority and Due Time
+→ Overdue and Upcoming Queries
+→ Persistent Conversation History
+→ Controlled Context Window
+→ AI Error Classification and Observability
+→ Security Review
+→ Full Ruff and mypy Coverage
+→ PostgreSQL Integration Tests
+→ Non-root Docker Release Candidate
+→ Health Checks and Recovery Rehearsal
 ```
+
+当前包版本为 `0.1.0`。
+
+本地发布候选已经具备完整测试、数据库迁移、非 root 容器、健康检查和备份恢复流程。公网部署、远程 CI 和 GitHub Release 仍待完成，因此不能宣称已经完成生产上线。

@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import (
     AsyncIterator,
@@ -5,12 +6,26 @@ from collections.abc import (
     Callable,
 )
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
+from task_cli.dependencies import get_db
 from task_cli.exceptions import TaskNotFoundError
 from task_cli.routers import assistant, auth, tasks
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -40,6 +55,40 @@ async def task_not_found_handler(
 @app.get("/")
 def root() -> dict[str, str]:
     return {"message": "Task API running"}
+
+
+@app.get("/health/live")
+def check_liveness() -> dict[str, str]:
+    return {
+        "status": "alive",
+    }
+
+
+@app.get("/health/ready")
+def check_readiness(
+    session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> dict[str, str]:
+    try:
+        session.execute(
+            text("SELECT 1"),
+        )
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Readiness check failed error_type=%s",
+            type(exc).__name__,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
+
+    return {
+        "status": "ready",
+    }
 
 
 @app.middleware("http")
