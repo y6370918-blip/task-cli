@@ -16,11 +16,13 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from task_cli.config import get_settings
 from task_cli.dependencies import get_db
 from task_cli.exceptions import TaskNotFoundError
 from task_cli.routers import assistant, auth, tasks
@@ -35,7 +37,30 @@ async def lifespan(
     yield
 
 
-app = FastAPI(title="Task API", lifespan=lifespan)
+settings = get_settings()
+
+app = FastAPI(
+    title="Task API",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        settings.frontend_origin,
+    ],
+    allow_credentials=False,
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+    ],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+    ],
+)
 
 
 @app.exception_handler(TaskNotFoundError)

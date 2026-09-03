@@ -97,3 +97,49 @@
     border-radius: 12px;
   }
 }
+
+.connection-panel {
+  margin-top: 24px;
+}
+
+.connection-button {
+  margin-top: 16px;
+  padding: 10px 16px;
+  color: #ffffff;
+  background: #2563eb;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.connection-button:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.connection-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.connection-panel .connection-result {
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+
+.connection-panel .connection-result--loading {
+  color: #1d4ed8;
+}
+
+.connection-panel .connection-result--success {
+  color: #166534;
+}
+
+.connection-panel .connection-result--error {
+  color: #b91c1c;
+}

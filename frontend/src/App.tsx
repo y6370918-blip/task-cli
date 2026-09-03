@@ -1,9 +1,14 @@
+import { useState } from "react";
+
+import { getReadiness } from "./api/health";
 import "./App.css";
 
 type Feature = {
   title: string;
   description: string;
 };
+
+type ConnectionStatus = "idle" | "loading" | "success" | "error";
 
 const features: Feature[] = [
   {
@@ -21,6 +26,37 @@ const features: Feature[] = [
 ];
 
 function App() {
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("idle");
+
+  const [connectionMessage, setConnectionMessage] =
+    useState("尚未检查后端连接。");
+
+  async function handleCheckConnection(): Promise<void> {
+    if (connectionStatus === "loading") {
+      return;
+    }
+
+    setConnectionStatus("loading");
+    setConnectionMessage("正在检查 API 和数据库连接……");
+
+    try {
+      const result = await getReadiness();
+
+      setConnectionStatus("success");
+      setConnectionMessage(
+        `后端状态：${result.status}。本次 API 响应和数据库查询成功。`,
+      );
+    } catch (error: unknown) {
+      setConnectionStatus("error");
+      setConnectionMessage(
+        error instanceof Error
+          ? `检查失败：${error.message}`
+          : "检查失败，请重试。",
+      );
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="hero" aria-labelledby="page-title">
@@ -32,8 +68,31 @@ function App() {
           为真实 FastAPI 后端建立的 React + TypeScript 前端。
         </p>
 
-        <p className="status">
-          Day51：前端骨架已建立，API 接入将在 Day52 完成。
+        <p className="status">Day52：通过统一 API Client 检查后端连接。</p>
+      </section>
+
+      <section
+        className="connection-panel feature-card"
+        aria-labelledby="connection-title"
+      >
+        <h2 id="connection-title">后端连接检查</h2>
+
+        <p>请求 /health/ready，检查 API 是否响应以及数据库能否执行查询。</p>
+
+        <button
+          type="button"
+          className="connection-button"
+          onClick={handleCheckConnection}
+          disabled={connectionStatus === "loading"}
+        >
+          {connectionStatus === "loading" ? "检查中……" : "检查后端连接"}
+        </button>
+
+        <p
+          className={`connection-result connection-result--${connectionStatus}`}
+          role="status"
+        >
+          {connectionMessage}
         </p>
       </section>
 

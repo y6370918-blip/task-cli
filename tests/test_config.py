@@ -42,3 +42,29 @@ def test_invalid_access_token_expire_minutes(
 
     with pytest.raises(ValueError):
         get_settings()
+
+
+def test_default_frontend_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(
+        "FRONTEND_ORIGIN",
+        raising=False,
+    )
+
+    settings = get_settings()
+
+    assert settings.frontend_origin == "http://localhost:5173"
+
+
+def test_frontend_origin_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FRONTEND_ORIGIN",
+        "https://task.example.com",
+    )
+
+    settings = get_settings()
+
+    assert settings.frontend_origin == "https://task.example.com"

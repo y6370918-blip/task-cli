@@ -13,6 +13,7 @@ class Settings:
     jwt_secret_key: str | None
     jwt_algorithm: str
     access_token_expire_minutes: int
+    frontend_origin: str
 
 
 def get_settings() -> Settings:
@@ -21,10 +22,7 @@ def get_settings() -> Settings:
             "DATABASE_URL",
             "sqlite:///data/tasks.db",
         ),
-        log_level=os.getenv(
-            "LOG_LEVEL",
-            "INFO",
-        ),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
         jwt_secret_key=(os.getenv("JWT_SECRET_KEY") or None),
         jwt_algorithm=os.getenv(
             "JWT_ALGORITHM",
@@ -35,5 +33,9 @@ def get_settings() -> Settings:
                 "ACCESS_TOKEN_EXPIRE_MINUTES",
                 "30",
             )
+        ),
+        frontend_origin=os.getenv(
+            "FRONTEND_ORIGIN",
+            "http://localhost:5173",
         ),
     )

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from task_cli.api import app
+from task_cli.api import app, settings
 from task_cli.dependencies import get_db
 
 
@@ -94,3 +94,59 @@ def test_openapi_contains_primary_routes(
         "/assistant/actions/{action_id}/confirm",
         "/assistant/actions/{action_id}/cancel",
     }.issubset(paths)
+
+
+def test_cors_allows_configured_frontend(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/health/live",
+        headers={
+            "Origin": settings.frontend_origin,
+        },
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["access-control-allow-origin"] == settings.frontend_origin
+
+
+def test_cors_allows_authorization_preflight(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/tasks/",
+        headers={
+            "Origin": settings.frontend_origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": ("authorization,content-type"),
+        },
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["access-control-allow-origin"] == settings.frontend_origin
+
+    allowed_headers = {
+        header.strip().lower()
+        for header in response.headers["access-control-allow-headers"].split(",")
+    }
+
+    assert {
+        "authorization",
+        "content-type",
+    }.issubset(allowed_headers)
+
+
+def test_cors_rejects_unconfigured_origin_preflight(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/tasks/",
+        headers={
+            "Origin": "https://untrusted.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": ("authorization,content-type"),
+        },
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "access-control-allow-origin" not in response.headers
