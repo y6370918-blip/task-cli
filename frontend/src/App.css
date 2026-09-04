@@ -311,3 +311,246 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* 任务面板只在认证成功后显示。 */
+.task-panel {
+  margin-top: 24px;
+}
+
+.task-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.task-limit {
+  margin: 0;
+  padding: 8px 12px;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.task-filters {
+  display: grid;
+  grid-template-columns:
+    minmax(160px, 1fr)
+    minmax(160px, 1fr)
+    auto;
+  grid-template-areas:
+    "status-label priority-label empty"
+    "status-select priority-select submit";
+  gap: 8px 16px;
+  margin-top: 24px;
+  align-items: end;
+}
+
+.task-filters label {
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.task-filters label[for="task-status-filter"] {
+  grid-area: status-label;
+}
+
+.task-filters label[for="task-priority-filter"] {
+  grid-area: priority-label;
+}
+
+#task-status-filter {
+  grid-area: status-select;
+}
+
+#task-priority-filter {
+  grid-area: priority-select;
+}
+
+.task-filters select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 36px 11px 12px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.task-filters select:focus {
+  border-color: #2563eb;
+  outline: 3px solid #dbeafe;
+}
+
+.task-filters select:disabled {
+  color: #64748b;
+  background: #f8fafc;
+  cursor: wait;
+}
+
+.task-filters .connection-button {
+  grid-area: submit;
+  margin-top: 0;
+  align-self: end;
+}
+
+.task-message {
+  margin: 18px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.task-message--loading {
+  color: #1d4ed8;
+}
+
+.task-message--success {
+  color: #166534;
+}
+
+.task-message--error {
+  color: #b91c1c;
+}
+
+.task-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.task-card {
+  padding: 22px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+}
+
+.task-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.task-card h3 {
+  margin: 4px 0 0;
+  color: #0f172a;
+  font-size: 1.1rem;
+}
+
+.task-id {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.task-badges {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-badge {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.task-status--pending {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.task-status--doing {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.task-status--done {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.task-priority--low {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.task-priority--medium {
+  color: #7c2d12;
+  background: #ffedd5;
+}
+
+.task-priority--high {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.task-description {
+  margin: 16px 0 0;
+  color: #475569;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.task-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 0;
+}
+
+.task-metadata div {
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.task-metadata dt {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.task-metadata dd {
+  margin: 6px 0 0;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+/* 小屏幕上将筛选器和任务信息改为单列。 */
+@media (max-width: 760px) {
+  .task-panel-heading,
+  .task-card-heading {
+    flex-direction: column;
+  }
+
+  .task-filters {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "status-label"
+      "status-select"
+      "priority-label"
+      "priority-select"
+      "submit";
+  }
+
+  .task-filters .connection-button {
+    justify-self: start;
+  }
+
+  .task-badges {
+    justify-content: flex-start;
+  }
+
+  .task-metadata {
+    grid-template-columns: 1fr;
+  }
+}

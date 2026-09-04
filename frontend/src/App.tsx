@@ -3,6 +3,7 @@ import { useState } from "react";
 import { type AuthenticatedUser } from "./api/auth";
 import { getReadiness } from "./api/health";
 import { AuthPanel } from "./components/AuthPanel";
+import { TaskPanel } from "./components/TaskPanel";
 import "./App.css";
 
 type Feature = {
@@ -99,7 +100,7 @@ function App() {
           为真实 FastAPI 后端建立的 React + TypeScript 前端。
         </p>
 
-        <p className="status">Day53：注册、登录与前端认证状态。</p>
+        <p className="status">Day54：认证后的任务列表与筛选。</p>
       </section>
 
       <section
@@ -134,6 +135,16 @@ function App() {
         onAuthenticated={handleAuthenticated}
         onLogout={handleLogout}
       />
+
+      {authSession !== null && (
+        <TaskPanel
+          // TaskPanel 只在登录后创建，所以这里能够安全读取 Token。
+          // Token 用于 Authorization 请求头，不会作为页面文字显示。
+          accessToken={authSession.accessToken}
+          // 任务请求返回 401 时复用退出函数，清除整个认证状态。
+          onUnauthorized={handleLogout}
+        />
+      )}
 
       <section className="feature-grid" aria-label="项目核心功能">
         {features.map((feature) => (
