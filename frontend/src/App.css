@@ -143,3 +143,171 @@
 .connection-panel .connection-result--error {
   color: #b91c1c;
 }
+
+/* 认证面板沿用 feature-card 的基础外观，
+   这里仅补充认证区域自己的布局。 */
+.auth-panel {
+  margin-top: 24px;
+}
+
+.auth-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.section-label {
+  margin: 0 0 8px;
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #f1f5f9;
+  border-radius: 12px;
+}
+
+.auth-tab {
+  padding: 8px 14px;
+  color: #475569;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-tab--active {
+  color: #1d4ed8;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.auth-tab:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-tab:focus-visible,
+.secondary-button:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+  margin-top: 24px;
+}
+
+.auth-form label {
+  margin-top: 8px;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.auth-form input:focus {
+  border-color: #2563eb;
+  outline: 3px solid #dbeafe;
+}
+
+.auth-form input:disabled {
+  color: #64748b;
+  background: #f8fafc;
+  cursor: wait;
+}
+
+.auth-form .connection-button {
+  justify-self: start;
+}
+
+.auth-message {
+  margin-top: 18px;
+  overflow-wrap: anywhere;
+}
+
+.auth-message--submitting {
+  color: #1d4ed8;
+}
+
+.auth-message--success {
+  color: #166534;
+}
+
+.auth-message--error {
+  color: #b91c1c;
+}
+
+.account-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.account-details div {
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.account-details dt {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.account-details dd {
+  margin: 8px 0 0;
+  color: #0f172a;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.secondary-button {
+  padding: 10px 16px;
+  color: #334155;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  background: #f8fafc;
+}
+
+/* 小屏幕上让标题、切换按钮和用户资料改为单列。 */
+@media (max-width: 760px) {
+  .auth-heading {
+    flex-direction: column;
+  }
+
+  .account-details {
+    grid-template-columns: 1fr;
+  }
+}

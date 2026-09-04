@@ -8,6 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from task_cli.auth import create_access_token
+from task_cli.auth_dependencies import get_current_user
 from task_cli.dependencies import get_db
 from task_cli.exceptions import UserAlreadyExistsError
 from task_cli.models import User
@@ -80,3 +81,14 @@ def login(
         "access_token": token,
         "token_type": "bearer",
     }
+
+
+@router.get(
+    "/me",
+    response_model=UserRead,
+)
+def get_me(
+    current_user: User = Depends(get_current_user),
+) -> User:
+
+    return current_user

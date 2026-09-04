@@ -1,6 +1,8 @@
 import { useState } from "react";
 
+import { type AuthenticatedUser } from "./api/auth";
 import { getReadiness } from "./api/health";
+import { AuthPanel } from "./components/AuthPanel";
 import "./App.css";
 
 type Feature = {
@@ -9,6 +11,13 @@ type Feature = {
 };
 
 type ConnectionStatus = "idle" | "loading" | "success" | "error";
+
+type AuthSession = {
+  // App 同时保存经过 /auth/me 验证的用户和原始 Token。
+  // Day54 请求任务列表时会使用 accessToken。
+  user: AuthenticatedUser;
+  accessToken: string;
+};
 
 const features: Feature[] = [
   {
@@ -31,6 +40,10 @@ function App() {
 
   const [connectionMessage, setConnectionMessage] =
     useState("尚未检查后端连接。");
+
+  // null 表示当前页面没有已认证会话。
+  // 这个状态只存在于内存中，刷新页面后会恢复为 null。
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
 
   async function handleCheckConnection(): Promise<void> {
     if (connectionStatus === "loading") {
@@ -57,6 +70,24 @@ function App() {
     }
   }
 
+  function handleAuthenticated(
+    user: AuthenticatedUser,
+    accessToken: string,
+  ): void {
+    // 只有 AuthPanel 完成登录并通过 /auth/me 后，
+    // 才会调用这个函数建立认证状态。
+    setAuthSession({
+      user,
+      accessToken,
+    });
+  }
+
+  function handleLogout(): void {
+    // 当前后端没有 Token 撤销接口。
+    // 这里仅清除前端内存中的用户资料和 Token。
+    setAuthSession(null);
+  }
+
   return (
     <main className="app-shell">
       <section className="hero" aria-labelledby="page-title">
@@ -68,7 +99,7 @@ function App() {
           为真实 FastAPI 后端建立的 React + TypeScript 前端。
         </p>
 
-        <p className="status">Day52：通过统一 API Client 检查后端连接。</p>
+        <p className="status">Day53：注册、登录与前端认证状态。</p>
       </section>
 
       <section
@@ -95,6 +126,14 @@ function App() {
           {connectionMessage}
         </p>
       </section>
+
+      <AuthPanel
+        // 可选链 ?.：authSession 为 null 时不读取 user。
+        // 空值合并 ??：左侧为 null 或 undefined 时使用 null。
+        currentUser={authSession?.user ?? null}
+        onAuthenticated={handleAuthenticated}
+        onLogout={handleLogout}
+      />
 
       <section className="feature-grid" aria-label="项目核心功能">
         {features.map((feature) => (
