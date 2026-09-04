@@ -21,13 +21,30 @@ export type TaskFilters = {
   priority: TaskPriority | "";
 };
 
+export type TaskCreateInput = {
+  title: string;
+  description: string | null;
+  priority: TaskPriority;
+  dueAt: string | null;
+};
+
+export type TaskUpdateInput = {
+  // 当前编辑表单会提交完整的可编辑字段。
+  // 后端虽然支持部分更新，但本阶段不需要构造动态 Patch 对象。
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  dueAt: string | null;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
 function isTaskStatus(value: unknown): value is TaskStatus {
-  // 这个运行时检查与上面的 TypeScript 联合类型对应。
-  // 联合类型检查前端代码，函数检查网络响应。
+  // TypeScript 联合类型只能检查前端代码，
+  // 这个函数负责检查运行时收到的网络数据。
   return value === "pending" || value === "doing" || value === "done";
 }
 
@@ -47,14 +64,15 @@ function isDateTimeString(value: unknown): value is string {
   return looksLikeIsoDateTime && !Number.isNaN(Date.parse(value));
 }
 
-function invalidTask(index: number): never {
-  // 不把完整响应写进错误消息，避免意外暴露任务内容。
-  throw new ApiError(`任务列表第 ${index + 1} 项格式不符合预期。`);
+function invalidTask(context: string): never {
+  // context 只由前端代码提供，
+  // 不包含服务器返回的任务内容。
+  throw new ApiError(`${context}格式不符合预期。`);
 }
 
-function parseTask(data: unknown, index: number): TaskItem {
+function parseTask(data: unknown, context: string): TaskItem {
   if (!isRecord(data)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (
@@ -62,35 +80,35 @@ function parseTask(data: unknown, index: number): TaskItem {
     !Number.isInteger(data.id) ||
     data.id <= 0
   ) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (typeof data.title !== "string" || data.title.length === 0) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (data.description !== null && typeof data.description !== "string") {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (!isTaskStatus(data.status)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (!isTaskPriority(data.priority)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (data.due_at !== null && !isDateTimeString(data.due_at)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (!isDateTimeString(data.created_at)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   if (!isDateTimeString(data.updated_at)) {
-    invalidTask(index);
+    invalidTask(context);
   }
 
   // 后端字段使用 snake_case，
@@ -112,25 +130,43 @@ function parseTaskList(data: unknown): TaskItem[] {
     throw new ApiError("任务列表响应格式不符合预期。");
   }
 
-  // Array.isArray 只验证外层。
-  // 将元素重新视为 unknown，逐项交给 parseTask 验证。
+  // Array.isArray 只验证了最外层是数组。
+  // 每一个数组元素仍然需要单独验证。
   const items: unknown[] = data;
 
-  return items.map((item, index) => parseTask(item, index));
+  return items.map((item, index) =>
+    parseTask(item, `任务列表第 ${index + 1} 项`),
+  );
+}
+
+function getAuthorization(accessToken: string): string {
+  const token = accessToken.trim();
+
+  if (token === "") {
+    throw new ApiError("缺少登录凭证。");
+  }
+
+  // 集中构造认证请求头，
+  // 避免多个 API 函数重复拼接 Bearer Token。
+  return `Bearer ${token}`;
+}
+
+function validateTaskId(taskId: number): void {
+  // 虽然后端还会检查任务是否存在，
+  // 前端仍应拒绝明显不合法的 ID。
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    throw new ApiError("任务 ID 不合法。");
+  }
 }
 
 export async function listTasks(
   accessToken: string,
   filters: TaskFilters,
 ): Promise<TaskItem[]> {
-  if (accessToken.trim() === "") {
-    throw new ApiError("缺少登录凭证。");
-  }
-
   const query = new URLSearchParams();
 
-  // Day54 暂不实现分页控件，先请求后端允许的最大数量。
-  // 页面稍后会明确提示“最多显示 100 条”。
+  // Day54 暂未实现分页控件，
+  // 先请求后端允许的最大数量。
   query.set("limit", "100");
 
   if (filters.status !== "") {
@@ -144,11 +180,88 @@ export async function listTasks(
   const data = await apiRequest<unknown>(`/tasks/?${query.toString()}`, {
     method: "GET",
     headers: {
-      // owner_id 不出现在请求中。
+      // owner_id 不由前端提供。
       // 后端从经过验证的 Token 中确定当前用户。
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: getAuthorization(accessToken),
     },
   });
 
   return parseTaskList(data);
+}
+
+export async function createTask(
+  accessToken: string,
+  input: TaskCreateInput,
+): Promise<TaskItem> {
+  const data = await apiRequest<unknown>("/tasks/", {
+    method: "POST",
+    headers: {
+      Authorization: getAuthorization(accessToken),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      title: input.title,
+      description: input.description,
+      priority: input.priority,
+
+      // 前端使用 camelCase，
+      // 发送给 FastAPI 时转换成 snake_case。
+      due_at: input.dueAt,
+    }),
+  });
+
+  // 创建和修改都复用与任务列表相同的
+  // 运行时响应字段验证。
+  return parseTask(data, "创建任务响应");
+}
+
+export async function updateTask(
+  accessToken: string,
+  taskId: number,
+  input: TaskUpdateInput,
+): Promise<TaskItem> {
+  validateTaskId(taskId);
+
+  const data = await apiRequest<unknown>(`/tasks/${taskId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: getAuthorization(accessToken),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      title: input.title,
+      description: input.description,
+      status: input.status,
+      priority: input.priority,
+
+      // null 会明确要求后端清除截止时间。
+      // 它与“不发送 due_at”具有不同含义。
+      due_at: input.dueAt,
+    }),
+  });
+
+  return parseTask(data, "更新任务响应");
+}
+
+export async function deleteTask(
+  accessToken: string,
+  taskId: number,
+): Promise<void> {
+  validateTaskId(taskId);
+
+  const data = await apiRequest<unknown>(`/tasks/${taskId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: getAuthorization(accessToken),
+    },
+  });
+
+  // 当前真实 REST 接口返回：
+  // {"message": "Task deleted"}
+  //
+  // 删除属于写操作，不能只看到 HTTP 200
+  // 就完全忽略后端响应协议。
+  if (!isRecord(data) || data.message !== "Task deleted") {
+    throw new ApiError("删除任务响应格式不符合预期。");
+  }
 }

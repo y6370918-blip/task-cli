@@ -2,13 +2,35 @@ import { type FormEvent, useState } from "react";
 
 import { ApiError } from "../api/client";
 import {
+  type TaskCreateInput,
   type TaskItem,
   type TaskPriority,
   type TaskStatus,
+  type TaskUpdateInput,
+  createTask,
+  deleteTask,
   listTasks,
+  updateTask,
 } from "../api/tasks";
+import { TaskForm } from "./TaskForm";
 
 type LoadStatus = "idle" | "loading" | "success" | "error";
+
+type OperationStatus = "idle" | "submitting";
+
+type OperationTone = "idle" | "loading" | "success" | "error";
+
+type EditorState =
+  | {
+      mode: "closed";
+    }
+  | {
+      mode: "create";
+    }
+  | {
+      mode: "edit";
+      task: TaskItem;
+    };
 
 type TaskPanelProps = {
   accessToken: string;
@@ -71,6 +93,10 @@ function formatDateTime(value: string | null): string {
   }).format(new Date(value));
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("");
 
@@ -82,19 +108,40 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
 
   const [message, setMessage] = useState("选择筛选条件，然后查询任务。");
 
-  async function handleLoadTasks(
-    event: FormEvent<HTMLFormElement>,
-  ): Promise<void> {
-    // 阻止浏览器刷新页面，由 React 调用 Task API。
-    event.preventDefault();
+  const [editor, setEditor] = useState<EditorState>({
+    mode: "closed",
+  });
 
-    if (loadStatus === "loading") {
-      return;
+  const [operationStatus, setOperationStatus] =
+    useState<OperationStatus>("idle");
+
+  const [operationTone, setOperationTone] = useState<OperationTone>("idle");
+
+  const [operationMessage, setOperationMessage] = useState("");
+
+  const [deleteCandidate, setDeleteCandidate] = useState<TaskItem | null>(null);
+
+  const busy = loadStatus === "loading" || operationStatus === "submitting";
+
+  function handleUnauthorizedError(error: unknown): boolean {
+    if (error instanceof ApiError && error.status === 401) {
+      // 401 表示当前认证凭证已经不能继续使用。
+      onUnauthorized();
+      return true;
     }
 
+    return false;
+  }
+
+  async function loadCurrentTasks(clearExisting: boolean): Promise<void> {
     setLoadStatus("loading");
-    setTasks([]);
     setMessage("正在查询任务……");
+
+    if (clearExisting) {
+      // 用户主动执行新查询时清除旧结果，
+      // 避免旧筛选结果与新筛选条件同时显示。
+      setTasks([]);
+    }
 
     try {
       const result = await listTasks(accessToken, {
@@ -110,18 +157,130 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
           : `查询到 ${result.length} 条任务，最多显示 100 条。`,
       );
     } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 401) {
-        // 401 表示当前认证凭证不能继续使用。
-        // 清除会话后，App 会卸载 TaskPanel 并恢复登录表单。
-        onUnauthorized();
+      if (handleUnauthorizedError(error)) {
         return;
       }
 
-      // 503、网络失败和响应格式错误不会自动退出登录。
+      // 写操作后的刷新失败时没有清除旧列表，
+      // 因此用户仍能看到刷新前的数据。
       setLoadStatus("error");
-      setMessage(
-        error instanceof Error ? error.message : "任务查询失败，请重试。",
+      setMessage(getErrorMessage(error, "任务查询失败，请重试。"));
+    }
+  }
+
+  async function handleLoadTasks(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+
+    if (busy) {
+      return;
+    }
+
+    setOperationTone("idle");
+    setOperationMessage("");
+
+    await loadCurrentTasks(true);
+  }
+
+  async function handleCreateTask(input: TaskCreateInput): Promise<void> {
+    if (operationStatus === "submitting") {
+      return;
+    }
+
+    setOperationStatus("submitting");
+    setOperationTone("loading");
+    setOperationMessage("正在创建任务……");
+
+    try {
+      const createdTask = await createTask(accessToken, input);
+
+      // 写操作成功后关闭编辑器。
+      // 随后重新查询，因为新任务可能不符合当前筛选条件。
+      setEditor({
+        mode: "closed",
+      });
+      setOperationTone("success");
+      setOperationMessage(
+        `任务 #${createdTask.id} 创建成功，列表已按当前筛选条件刷新。`,
       );
+
+      await loadCurrentTasks(false);
+    } catch (error: unknown) {
+      if (handleUnauthorizedError(error)) {
+        return;
+      }
+
+      setOperationTone("error");
+      setOperationMessage(getErrorMessage(error, "任务创建失败，请重试。"));
+    } finally {
+      setOperationStatus("idle");
+    }
+  }
+
+  async function handleUpdateTask(input: TaskUpdateInput): Promise<void> {
+    if (editor.mode !== "edit" || operationStatus === "submitting") {
+      return;
+    }
+
+    const taskId = editor.task.id;
+
+    setOperationStatus("submitting");
+    setOperationTone("loading");
+    setOperationMessage(`正在修改任务 #${taskId}……`);
+
+    try {
+      const updatedTask = await updateTask(accessToken, taskId, input);
+
+      setEditor({
+        mode: "closed",
+      });
+      setOperationTone("success");
+      setOperationMessage(
+        `任务 #${updatedTask.id} 修改成功，列表已按当前筛选条件刷新。`,
+      );
+
+      await loadCurrentTasks(false);
+    } catch (error: unknown) {
+      if (handleUnauthorizedError(error)) {
+        return;
+      }
+
+      setOperationTone("error");
+      setOperationMessage(getErrorMessage(error, "任务修改失败，请重试。"));
+    } finally {
+      setOperationStatus("idle");
+    }
+  }
+
+  async function handleConfirmDelete(): Promise<void> {
+    if (deleteCandidate === null || operationStatus === "submitting") {
+      return;
+    }
+
+    const taskId = deleteCandidate.id;
+
+    setOperationStatus("submitting");
+    setOperationTone("loading");
+    setOperationMessage(`正在删除任务 #${taskId}……`);
+
+    try {
+      await deleteTask(accessToken, taskId);
+
+      setDeleteCandidate(null);
+      setOperationTone("success");
+      setOperationMessage(`任务 #${taskId} 已删除，列表已按当前筛选条件刷新。`);
+
+      await loadCurrentTasks(false);
+    } catch (error: unknown) {
+      if (handleUnauthorizedError(error)) {
+        return;
+      }
+
+      setOperationTone("error");
+      setOperationMessage(getErrorMessage(error, "任务删除失败，请重试。"));
+    } finally {
+      setOperationStatus("idle");
     }
   }
 
@@ -137,8 +296,106 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
           <h2 id="task-panel-title">我的任务</h2>
         </div>
 
-        <p className="task-limit">最多显示 100 条</p>
+        <div className="task-panel-heading-actions">
+          <p className="task-limit">最多显示 100 条</p>
+
+          <button
+            type="button"
+            className="connection-button task-create-button"
+            disabled={busy}
+            onClick={() => {
+              setDeleteCandidate(null);
+              setEditor({
+                mode: "create",
+              });
+              setOperationTone("idle");
+              setOperationMessage("");
+            }}
+          >
+            创建任务
+          </button>
+        </div>
       </div>
+
+      {editor.mode === "create" && (
+        <TaskForm
+          // key 让每次重新打开创建表单时
+          // 都获得一组全新的本地 state。
+          key="create-task"
+          mode="create"
+          submitting={operationStatus === "submitting"}
+          onSubmit={handleCreateTask}
+          onCancel={() => {
+            setEditor({
+              mode: "closed",
+            });
+          }}
+        />
+      )}
+
+      {editor.mode === "edit" && (
+        <TaskForm
+          // 切换到不同任务时 key 会变化，
+          // React 会重新创建表单并加载对应初始值。
+          key={`edit-task-${editor.task.id}`}
+          mode="edit"
+          task={editor.task}
+          submitting={operationStatus === "submitting"}
+          onSubmit={handleUpdateTask}
+          onCancel={() => {
+            setEditor({
+              mode: "closed",
+            });
+          }}
+        />
+      )}
+
+      {deleteCandidate !== null && (
+        <div
+          className="task-delete-confirmation"
+          role="alertdialog"
+          aria-labelledby="delete-task-title"
+        >
+          <h3 id="delete-task-title">确认删除任务 #{deleteCandidate.id}</h3>
+
+          <p>“{deleteCandidate.title}”删除后无法从当前应用中恢复。</p>
+
+          <p>这是前端本地确认；确认后 REST API 会立即执行删除。</p>
+
+          <div className="task-editor-actions">
+            <button
+              type="button"
+              className="danger-button"
+              disabled={operationStatus === "submitting"}
+              onClick={() => {
+                void handleConfirmDelete();
+              }}
+            >
+              {operationStatus === "submitting" ? "删除中……" : "确认删除"}
+            </button>
+
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={operationStatus === "submitting"}
+              onClick={() => {
+                setDeleteCandidate(null);
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {operationMessage !== "" && (
+        <p
+          className={`task-operation-message task-operation-message--${operationTone}`}
+          role="status"
+        >
+          {operationMessage}
+        </p>
+      )}
 
       <form className="task-filters" onSubmit={handleLoadTasks}>
         <label htmlFor="task-status-filter">状态</label>
@@ -147,7 +404,7 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
           id="task-status-filter"
           name="status"
           value={statusFilter}
-          disabled={loadStatus === "loading"}
+          disabled={busy}
           onChange={(event) => {
             setStatusFilter(readStatusFilter(event.target.value));
           }}
@@ -164,7 +421,7 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
           id="task-priority-filter"
           name="priority"
           value={priorityFilter}
-          disabled={loadStatus === "loading"}
+          disabled={busy}
           onChange={(event) => {
             setPriorityFilter(readPriorityFilter(event.target.value));
           }}
@@ -175,11 +432,7 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
           <option value="high">高</option>
         </select>
 
-        <button
-          type="submit"
-          className="connection-button"
-          disabled={loadStatus === "loading"}
-        >
+        <button type="submit" className="connection-button" disabled={busy}>
           {loadStatus === "loading" ? "查询中……" : "查询任务"}
         </button>
       </form>
@@ -188,7 +441,7 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
         {message}
       </p>
 
-      {loadStatus === "success" && tasks.length > 0 && (
+      {tasks.length > 0 && (
         <div className="task-list">
           {tasks.map((task) => (
             <article className="task-card" key={task.id}>
@@ -228,6 +481,43 @@ export function TaskPanel({ accessToken, onUnauthorized }: TaskPanelProps) {
                   <dd>{formatDateTime(task.createdAt)}</dd>
                 </div>
               </dl>
+
+              <div className="task-card-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => {
+                    setDeleteCandidate(null);
+                    setEditor({
+                      mode: "edit",
+                      task,
+                    });
+                    setOperationTone("idle");
+                    setOperationMessage("");
+                  }}
+                >
+                  编辑
+                </button>
+
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={busy}
+                  onClick={() => {
+                    // 打开删除确认时关闭编辑表单，
+                    // 避免页面同时存在两个写操作入口。
+                    setEditor({
+                      mode: "closed",
+                    });
+                    setDeleteCandidate(task);
+                    setOperationTone("idle");
+                    setOperationMessage("");
+                  }}
+                >
+                  删除
+                </button>
+              </div>
             </article>
           ))}
         </div>

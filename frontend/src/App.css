@@ -554,3 +554,190 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Day55：任务创建、编辑和删除操作。 */
+.task-panel-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-create-button {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.task-editor {
+  display: grid;
+  gap: 10px;
+  max-width: 680px;
+  margin-top: 24px;
+  padding: 22px;
+  background: #f8fafc;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+}
+
+.task-editor-heading {
+  margin-bottom: 4px;
+}
+
+.task-editor-heading h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.task-editor label {
+  margin-top: 8px;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.task-editor input,
+.task-editor textarea,
+.task-editor select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.task-editor textarea {
+  resize: vertical;
+}
+
+.task-editor input:focus,
+.task-editor textarea:focus,
+.task-editor select:focus {
+  border-color: #2563eb;
+  outline: 3px solid #dbeafe;
+}
+
+.task-editor input:disabled,
+.task-editor textarea:disabled,
+.task-editor select:disabled {
+  color: #64748b;
+  background: #f1f5f9;
+  cursor: wait;
+}
+
+.task-editor .task-editor-help {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.task-editor .task-editor-error {
+  margin: 4px 0 0;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.task-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.task-editor-actions .connection-button {
+  margin-top: 0;
+}
+
+.task-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.danger-button {
+  padding: 10px 16px;
+  color: #ffffff;
+  background: #dc2626;
+  border: 1px solid #dc2626;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.danger-button:focus-visible {
+  outline: 3px solid #fecaca;
+  outline-offset: 3px;
+}
+
+.danger-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.task-delete-confirmation {
+  margin-top: 24px;
+  padding: 20px;
+  color: #7f1d1d;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+}
+
+.task-delete-confirmation h3 {
+  margin: 0;
+  color: #991b1b;
+}
+
+.task-delete-confirmation p {
+  margin: 8px 0 0;
+  color: #7f1d1d;
+}
+
+.task-operation-message {
+  margin: 18px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.task-operation-message--loading {
+  color: #1d4ed8;
+}
+
+.task-operation-message--success {
+  color: #166534;
+}
+
+.task-operation-message--error {
+  color: #b91c1c;
+}
+
+@media (max-width: 760px) {
+  .task-panel-heading-actions {
+    width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-editor {
+    padding: 18px;
+  }
+
+  .task-editor-actions,
+  .task-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .task-editor-actions button,
+  .task-card-actions button {
+    width: 100%;
+  }
+}
