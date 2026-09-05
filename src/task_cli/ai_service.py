@@ -23,6 +23,10 @@ from task_cli.conversation_service import (
     create_message,
     list_conversation_messages,
 )
+from task_cli.schemas_ai import (
+    AssistantResult,
+    PendingActionRead,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,12 @@ SYSTEM_PROMPT = """
 - 设置或修改截止时间时，只能使用包含时区的明确日期时间。
 - 如果用户只提供相对或模糊时间，必须先要求用户补充明确日期和时区，不能猜测后调用工具。
 - 用户明确要求清除截止时间时，调用 update_task 并把 due_at 设为 null。
-- 删除属于危险操作，只能请求删除，不能直接执行删除。
+- 用户明确要求删除任务且目标 task_id 已明确时，调用 request_delete_task。
+- 不要先进行额外的口头确认。
+- request_delete_task 只创建待确认操作，不会真正删除任务。
+- AI 删除流程的实际执行由用户点击页面确认按钮触发，不能用聊天中的“确认”代替按钮操作。
+- 如果目标任务不明确，先查询任务或追问用户，不得猜测 task_id。
+- 待确认操作编号必须来自工具返回结果，不得自行编造。
 """
 
 
@@ -108,7 +117,11 @@ def _finish_with_assistant_reply(
     owner_id: int,
     conversation_id: int | None,
     reply: str,
-) -> str:
+    pending_action: PendingActionRead | None = None,
+) -> AssistantResult:
+    # 消息表仍然保存回复文字。
+    # PendingAction 本身已由工具保存到数据库，
+    # 这里不重复创建待确认操作。
     _persist_message(
         db=db,
         owner_id=owner_id,
@@ -117,15 +130,20 @@ def _finish_with_assistant_reply(
         content=reply,
     )
 
-    return reply
+    # 所有返回分支都获得相同形状的结果。
+    # 普通回复不传 pending_action，自动使用 None。
+    return AssistantResult(
+        reply=reply,
+        pending_action=pending_action,
+    )
 
 
-def run_task_assistant(
+def run_task_assistant_result(
     db: Session,
     owner_id: int,
     message: str,
     conversation_id: int | None = None,
-) -> str:
+) -> AssistantResult:
     messages: list[Any] = [
         {
             "role": "system",
@@ -401,23 +419,35 @@ def run_task_assistant(
                 )
 
             if tool_name == "request_delete_task":
-                task_id = result_data.get("task_id")
+                # 从真实 Python 工具的结构化结果构造对象。
+                # confirmation_id 是工具现有字段；
+                # action_id 是提供给 Router 和前端的字段。
+                pending_action = PendingActionRead.model_validate(
+                    {
+                        "action_id": result_data.get("confirmation_id"),
+                        "action": result_data.get("action"),
+                        "task_id": result_data.get("task_id"),
+                        "expires_at": result_data.get("expires_at"),
+                    }
+                )
 
-                confirmation_id = result_data.get("confirmation_id")
-
+                # 展示文字使用已经验证的字段生成。
+                # 前端之后直接读取 pending_action，
+                # 不需要从这段中文中提取编号。
                 reply = (
-                    f"删除任务 #{task_id} "
+                    f"删除任务 #{pending_action.task_id} "
                     f"需要确认。"
                     f"确认操作编号为 "
-                    f"#{confirmation_id}。"
+                    f"#{pending_action.action_id}。"
                     f"请确认或取消该操作。"
                 )
 
                 return _finish_with_assistant_reply(
                     db=db,
                     owner_id=owner_id,
-                    conversation_id=(conversation_id),
+                    conversation_id=conversation_id,
                     reply=reply,
+                    pending_action=pending_action,
                 )
 
             # list_tasks 是读操作，需要模型继续整理结果。
@@ -435,3 +465,21 @@ def run_task_assistant(
         conversation_id=conversation_id,
         reply=reply,
     )
+
+
+def run_task_assistant(
+    db: Session,
+    owner_id: int,
+    message: str,
+    conversation_id: int | None = None,
+) -> str:
+    # 保留旧入口的字符串返回约定。
+    # Agent 只执行一次，这里仅取出结果对象中的 reply。
+    result = run_task_assistant_result(
+        db=db,
+        owner_id=owner_id,
+        message=message,
+        conversation_id=conversation_id,
+    )
+
+    return result.reply

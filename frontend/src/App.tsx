@@ -5,6 +5,7 @@ import { getReadiness } from "./api/health";
 import { AuthPanel } from "./components/AuthPanel";
 import { TaskPanel } from "./components/TaskPanel";
 import "./App.css";
+import { AssistantPanel } from "./components/AssistantPanel";
 
 type Feature = {
   title: string;
@@ -100,7 +101,7 @@ function App() {
           为真实 FastAPI 后端建立的 React + TypeScript 前端。
         </p>
 
-        <p className="status">Day54：认证后的任务列表与筛选。</p>
+        <p className="status">Day56：AI 对话与任务操作确认。</p>
       </section>
 
       <section
@@ -142,6 +143,17 @@ function App() {
           // Token 用于 Authorization 请求头，不会作为页面文字显示。
           accessToken={authSession.accessToken}
           // 任务请求返回 401 时复用退出函数，清除整个认证状态。
+          onUnauthorized={handleLogout}
+        />
+      )}
+
+      {authSession !== null && (
+        <AssistantPanel
+          // 不同用户使用不同的组件身份，
+          // 避免切换账号时沿用上一位用户的本地对话状态。
+          key={authSession.user.id}
+          accessToken={authSession.accessToken}
+          // 只有明确收到 401，才通知 App 清除认证状态。
           onUnauthorized={handleLogout}
         />
       )}

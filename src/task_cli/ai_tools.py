@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from task_cli.action_service import create_pending_action
+from task_cli.action_service import create_pending_action, ensure_utc
 from task_cli.ai_exceptions import AIToolError
 from task_cli.exceptions import TaskNotFoundError
 from task_cli.schemas import (
@@ -233,10 +233,15 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "request_delete_task",
+            # 说明调用时机，避免模型把“创建申请”
+            # 误认为“已经批准执行删除”。
             "description": (
-                "请求删除当前用户的某个任务。"
-                "这是危险操作，此工具不会真正删除任务，"
-                "只会要求用户进一步确认。"
+                "为当前用户的指定任务创建待确认删除操作，不会真正删除任务。"
+                "当用户明确要求删除且任务 ID 已明确时调用，"
+                "无需在调用前额外询问是否确认删除。"
+                "工具返回操作编号和有效期，供页面显示确认或取消按钮。"
+                "实际删除必须经过后端确认接口的校验。"
+                "目标不明确时应先澄清，不得猜测任务 ID。"
             ),
             "parameters": {
                 "type": "object",
@@ -464,7 +469,10 @@ def execute_tool(
                 "action": "delete_task",
                 "confirmation_id": (pending_action.id),
                 "task_id": task_id,
-                "expires_at": (pending_action.expires_at.isoformat()),
+                # 这个时间由服务器用 UTC 生成。
+                # SQLite 读取后可能丢失时区，复用已有函数恢复 UTC；
+                # PostgreSQL 返回的带时区时间也会统一转换为 UTC。
+                "expires_at": ensure_utc(pending_action.expires_at).isoformat(),
                 "message": (
                     f"删除任务 {task_id} "
                     f"需要用户确认。"

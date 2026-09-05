@@ -5,13 +5,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 import task_cli.routers.assistant as assistant_router
-from task_cli.action_service import create_pending_action
+from task_cli.action_service import create_pending_action, ensure_utc
 from task_cli.ai_exceptions import AIProviderError
 from task_cli.conversation_service import (
     create_conversation,
     create_message,
 )
 from task_cli.models import Conversation, Task, User
+from task_cli.schemas_ai import (
+    AssistantResult,
+    PendingActionRead,
+)
 
 
 def test_assistant_creates_conversation_and_returns_reply(
@@ -19,12 +23,12 @@ def test_assistant_creates_conversation_and_returns_reply(
     user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_run_task_assistant(
+    def fake_run_task_assistant_result(
         db: Session,
         owner_id: int,
         message: str,
         conversation_id: int,
-    ) -> str:
+    ) -> AssistantResult:
         assert owner_id == user.id
         assert message == "总结我的任务"
 
@@ -36,12 +40,14 @@ def test_assistant_creates_conversation_and_returns_reply(
         assert conversation is not None
         assert conversation.owner_id == user.id
 
-        return "你目前没有任务。"
+        return AssistantResult(
+            reply="你目前没有任务。",
+        )
 
     monkeypatch.setattr(
         assistant_router,
-        "run_task_assistant",
-        fake_run_task_assistant,
+        "run_task_assistant_result",
+        fake_run_task_assistant_result,
     )
 
     response = authenticated_client.post(
@@ -54,7 +60,8 @@ def test_assistant_creates_conversation_and_returns_reply(
     assert response.status_code == 200
 
     data = response.json()
-
+    # 没有产生待确认操作时，接口明确返回 null。
+    assert data["pending_action"] is None
     assert data["reply"] == "你目前没有任务。"
     assert isinstance(
         data["conversation_id"],
@@ -74,23 +81,25 @@ def test_assistant_continues_owned_conversation(
         owner_id=user.id,
     )
 
-    def fake_run_task_assistant(
+    def fake_run_task_assistant_result(
         db: Session,
         owner_id: int,
         message: str,
         conversation_id: int,
-    ) -> str:
+    ) -> AssistantResult:
         assert db is db_session
         assert owner_id == user.id
         assert message == "继续刚才的内容"
         assert conversation_id == conversation.id
 
-        return "已经继续该会话。"
+        return AssistantResult(
+            reply="已经继续该会话。",
+        )
 
     monkeypatch.setattr(
         assistant_router,
-        "run_task_assistant",
-        fake_run_task_assistant,
+        "run_task_assistant_result",
+        fake_run_task_assistant_result,
     )
 
     response = authenticated_client.post(
@@ -105,6 +114,7 @@ def test_assistant_continues_owned_conversation(
     assert response.json() == {
         "conversation_id": conversation.id,
         "reply": "已经继续该会话。",
+        "pending_action": None,
     }
 
 
@@ -112,18 +122,18 @@ def test_assistant_provider_error_returns_503(
     authenticated_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def failing_run_task_assistant(
+    def failing_run_task_assistant_result(
         db: Session,
         owner_id: int,
         message: str,
         conversation_id: int,
-    ) -> str:
+    ) -> AssistantResult:
         raise AIProviderError("模拟 DeepSeek 不可用")
 
     monkeypatch.setattr(
         assistant_router,
-        "run_task_assistant",
-        failing_run_task_assistant,
+        "run_task_assistant_result",
+        failing_run_task_assistant_result,
     )
 
     response = authenticated_client.post(
@@ -259,21 +269,23 @@ def test_assistant_hides_other_users_conversation(
 
     provider_was_called = False
 
-    def fake_run_task_assistant(
+    def fake_run_task_assistant_result(
         db: Session,
         owner_id: int,
         message: str,
         conversation_id: int,
-    ) -> str:
+    ) -> AssistantResult:
         nonlocal provider_was_called
         provider_was_called = True
 
-        return "不应该执行到这里"
+        return AssistantResult(
+            reply="不应该执行到这里",
+        )
 
     monkeypatch.setattr(
         assistant_router,
-        "run_task_assistant",
-        fake_run_task_assistant,
+        "run_task_assistant_result",
+        fake_run_task_assistant_result,
     )
 
     response = authenticated_client.post(
@@ -425,3 +437,93 @@ def test_other_user_cannot_read_conversation_messages(
     assert response.json() == {
         "detail": "会话不存在",
     }
+
+
+def test_assistant_returns_structured_pending_action(
+    authenticated_client: TestClient,
+    db_session: Session,
+    user: User,
+    task: Task,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    action = create_pending_action(
+        session=db_session,
+        owner_id=user.id,
+        action="delete_task",
+        payload={
+            "task_id": task.id,
+        },
+    )
+
+    expected_expiry = ensure_utc(action.expires_at)
+
+    def fake_run_task_assistant_result(
+        db: Session,
+        owner_id: int,
+        message: str,
+        conversation_id: int,
+    ) -> AssistantResult:
+        assert db is db_session
+        assert owner_id == user.id
+        assert message == "删除这个任务"
+
+        conversation = db.get(
+            Conversation,
+            conversation_id,
+        )
+        assert conversation is not None
+        assert conversation.owner_id == user.id
+
+        # 这个测试聚焦 Router 对结构化结果的传递。
+        # Service 如何创建操作，已由上一小步的测试覆盖。
+        return AssistantResult(
+            reply="请确认或取消删除。",
+            pending_action=PendingActionRead(
+                action_id=action.id,
+                action="delete_task",
+                task_id=task.id,
+                expires_at=expected_expiry,
+            ),
+        )
+
+    monkeypatch.setattr(
+        assistant_router,
+        "run_task_assistant_result",
+        fake_run_task_assistant_result,
+    )
+
+    response = authenticated_client.post(
+        "/assistant/",
+        json={
+            "message": "删除这个任务",
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["conversation_id"] > 0
+    assert data["reply"] == "请确认或取消删除。"
+
+    pending = data["pending_action"]
+
+    # 精确检查公开字段，避免把内部 payload、owner_id 等直接暴露。
+    assert set(pending) == {
+        "action_id",
+        "action",
+        "task_id",
+        "expires_at",
+    }
+    assert pending["action_id"] == action.id
+    assert pending["action"] == "delete_task"
+    assert pending["task_id"] == task.id
+
+    # 比较实际时间点，不依赖 UTC 被写成 Z 还是 +00:00。
+    returned_expiry = datetime.fromisoformat(pending["expires_at"])
+    assert returned_expiry.tzinfo is not None
+    assert returned_expiry == expected_expiry
+
+    # 返回确认信息不等于执行删除。
+    db_session.refresh(action)
+    assert action.status == "pending"
+    assert db_session.get(Task, task.id) is not None

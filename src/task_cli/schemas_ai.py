@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -70,11 +71,41 @@ class AssistantRequest(BaseModel):
     )
 
 
-class AssistantResponse(BaseModel):
-    conversation_id: int = Field(
-        gt=0,
+class PendingActionRead(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
     )
+
+    # 这是 PendingAction 的编号，不是 Task 的编号。
+    action_id: int = Field(gt=0)
+
+    # 当前项目只有删除任务需要服务器确认。
+    action: Literal["delete_task"]
+
+    task_id: int = Field(gt=0)
+
+    # 返回前端的过期时间必须包含时区，
+    # 浏览器才能正确显示同一个时间点。
+    expires_at: AwareDatetime
+
+
+class AssistantResult(BaseModel):
+    # Service 的结果对象。
+    # conversation_id 仍由 Router 管理，所以不放在这里。
     reply: str
+
+    # None 表示这次回复没有产生待确认操作。
+    # Python 的 None 序列化为 JSON 后就是 null。
+    pending_action: PendingActionRead | None = None
+
+
+class AssistantResponse(BaseModel):
+    conversation_id: int = Field(gt=0)
+    reply: str
+
+    # 字段必须出现在 HTTP 响应模型中，
+    # FastAPI 才会将它作为正式响应内容返回给前端。
+    pending_action: PendingActionRead | None = None
 
 
 class ConversationRead(BaseModel):

@@ -19,7 +19,54 @@ from task_cli.conversation_service import (
     create_message,
     list_conversation_messages,
 )
-from task_cli.models import Message, Task, User
+from task_cli.models import Message, PendingAction, Task, User
+
+
+@pytest.mark.parametrize(
+    "reply_text",
+    [
+        "你好，我可以帮你管理任务。",
+        "删除任务 #6 需要确认。确认操作编号为 #12。",
+    ],
+)
+def test_text_reply_does_not_create_pending_action(
+    db_session: Session,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    reply_text: str,
+) -> None:
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        # 模拟模型只输出文字，没有调用删除请求工具。
+        return make_text_response(reply_text)
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    result = ai_service.run_task_assistant_result(
+        db=db_session,
+        owner_id=user.id,
+        message="请帮我管理任务。",
+    )
+
+    assert result.reply == reply_text
+
+    # 回复中出现编号不代表真实创建了 PendingAction。
+    assert result.pending_action is None
+
+    saved_actions = list(
+        db_session.scalars(
+            select(PendingAction).where(
+                PendingAction.owner_id == user.id,
+            )
+        )
+    )
+
+    assert saved_actions == []
 
 
 def make_text_response(content: str) -> SimpleNamespace:
@@ -347,6 +394,80 @@ def test_clear_task_due_at_returns_immediately(
         f"当前状态为 {task.status}，"
         f"优先级为 {task.priority}。"
         f"截止时间为 未设置。"
+    )
+
+
+def test_delete_request_returns_structured_pending_action(
+    db_session: Session,
+    user: User,
+    task: Task,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_call_count = 0
+
+    def fake_provider(
+        messages: list[dict],
+    ) -> SimpleNamespace:
+        nonlocal provider_call_count
+        provider_call_count += 1
+
+        return make_tool_response(
+            call_id="call-delete-task-1",
+            name="request_delete_task",
+            arguments={
+                "task_id": task.id,
+            },
+        )
+
+    monkeypatch.setattr(
+        ai_service,
+        "call_ai_provider",
+        fake_provider,
+    )
+
+    # 新入口将返回回复文字和结构化待确认操作。
+    # 旧的 run_task_assistant() 仍然只返回字符串，
+    # 以保持已有调用和测试兼容。
+    result = ai_service.run_task_assistant_result(
+        db=db_session,
+        owner_id=user.id,
+        message=(f"删除任务 {task.id}"),
+    )
+
+    assert provider_call_count == 1
+
+    pending_action = result.pending_action
+
+    assert pending_action is not None
+
+    assert result.reply == (
+        f"删除任务 #{task.id} "
+        f"需要确认。"
+        f"确认操作编号为 "
+        f"#{pending_action.action_id}。"
+        f"请确认或取消该操作。"
+    )
+
+    assert pending_action.action == "delete_task"
+    assert pending_action.task_id == task.id
+    assert pending_action.expires_at.tzinfo is not None
+
+    saved_action = db_session.get(
+        PendingAction,
+        pending_action.action_id,
+    )
+
+    assert saved_action is not None
+    assert saved_action.status == "pending"
+
+    # 请求删除只创建待确认操作，
+    # 此时真实任务还不能被删除。
+    assert (
+        db_session.get(
+            Task,
+            task.id,
+        )
+        is not None
     )
 
 
