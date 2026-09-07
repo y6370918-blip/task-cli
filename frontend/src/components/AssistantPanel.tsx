@@ -1,12 +1,16 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import {
+  type ConversationItem,
   type PendingActionItem,
   cancelAssistantAction,
   confirmAssistantAction,
+  getAssistantConversationMessages,
+  listAssistantConversations,
   sendAssistantMessage,
 } from "../api/assistant";
 import { ApiError } from "../api/client";
+import { formatDateTime } from "../utils/datetime";
 
 type AssistantPanelProps = {
   accessToken: string;
@@ -14,26 +18,23 @@ type AssistantPanelProps = {
 };
 
 type ChatMessage = {
-  id: number;
+  id: string;
   role: "user" | "assistant";
   content: string;
 };
 
-type RequestStatus = "idle" | "sending" | "confirming" | "cancelling";
+type RequestStatus =
+  | "idle"
+  | "sending"
+  | "confirming"
+  | "cancelling"
+  | "loading-conversations"
+  | "loading-history";
 
 type Feedback = {
   tone: "success" | "error";
   text: string;
 };
-
-function formatExpiry(value: string): string {
-  // API Client 已经验证时间字符串包含时区。
-  // 显示时转换为浏览器所在地区的本地时间。
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -59,10 +60,20 @@ export function AssistantPanel({
 
   const [conversationUnavailable, setConversationUnavailable] = useState(false);
 
+  // 列表数据与当前打开的会话分别保存。
+  // 刷新列表不会自动切换当前会话。
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+
+  // 区分“还没查询”和“查询成功但没有会话”。
+  // 两种情况下 conversations 都可能是空数组。
+  const [hasLoadedConversations, setHasLoadedConversations] = useState(false);
   // useRef 保存跨渲染的值，但修改 .current 不会触发重新渲染。
   // 它能立即记录请求已开始，补充 state 更新之前的重复点击检查。
   const requestInFlight = useRef(false);
 
+  // 本页成功追加消息时递增。
+  // 不是数据库编号，也不会发送给后端。
+  const nextLocalTurnId = useRef(1);
   // 记录当前组件是否仍在页面中。
   const mounted = useRef(false);
 
@@ -81,12 +92,146 @@ export function AssistantPanel({
   const busy = requestStatus !== "idle";
   const messageLength = Array.from(draft.trim()).length;
 
+  const hasDraft = draft.trim() !== "";
+
+  // 切换和新建都不能静默丢弃草稿或当前确认卡片。
+  const canSwitchConversation = !busy && pendingAction === null && !hasDraft;
+
   const canSend =
     !busy &&
     pendingAction === null &&
     !conversationUnavailable &&
     messageLength > 0 &&
     messageLength <= 1000;
+
+  async function handleLoadConversations(): Promise<void> {
+    // 读取列表也复用请求锁，
+    // 避免与发送消息或确认操作同时进行。
+    if (requestInFlight.current || pendingAction !== null) {
+      return;
+    }
+
+    requestInFlight.current = true;
+    setRequestStatus("loading-conversations");
+    setFeedback(null);
+
+    try {
+      const items = await listAssistantConversations(accessToken);
+
+      // 用户退出后，不再用旧请求更新这个组件。
+      if (!mounted.current) {
+        return;
+      }
+
+      setConversations(items);
+      setHasLoadedConversations(true);
+
+      // 这里只更新列表。
+      // 不修改当前会话编号、聊天消息或草稿。
+    } catch (error: unknown) {
+      if (!mounted.current) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 401) {
+        onUnauthorized();
+        return;
+      }
+
+      // 失败时保留已有列表和当前对话。
+      // 不把请求失败伪装成“查询成功但没有会话”。
+      setFeedback({
+        tone: "error",
+        text: getErrorMessage(error, "读取会话列表失败，请稍后重试。"),
+      });
+    } finally {
+      // 成功或失败都释放锁，允许用户进行下一次操作。
+      requestInFlight.current = false;
+
+      if (mounted.current) {
+        setRequestStatus("idle");
+      }
+    }
+  }
+  async function handleSelectConversation(targetId: number): Promise<void> {
+    // disabled 控制按钮是否可点击，函数内部仍保留检查。
+    if (requestInFlight.current || !canSwitchConversation) {
+      return;
+    }
+
+    requestInFlight.current = true;
+    setRequestStatus("loading-history");
+    setFeedback(null);
+
+    try {
+      const history = await getAssistantConversationMessages(
+        accessToken,
+        targetId,
+      );
+
+      if (!mounted.current) {
+        return;
+      }
+
+      // : ChatMessage 是回调函数的返回类型标注。
+      // 每条历史消息转换成组件需要的显示对象。
+      const historyMessages = history.map(
+        (message): ChatMessage => ({
+          id: `history-${message.id}`,
+          role: message.role,
+          content: message.content,
+        }),
+      );
+
+      // 读取和校验成功后，才一并更新编号和消息。
+      // 加载过程中仍保留原会话，避免编号与内容错配。
+      setConversationId(targetId);
+      setMessages(historyMessages);
+      setDraft("");
+      setConversationUnavailable(false);
+
+      // 不从历史文字恢复 pendingAction，
+      // 也不重新执行历史中的工具调用。
+      setFeedback({
+        tone: "success",
+        text: `已读取会话 #${targetId} 的 ${history.length} 条可见历史消息，可继续对话。`,
+      });
+    } catch (error: unknown) {
+      if (!mounted.current) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 401) {
+        onUnauthorized();
+        return;
+      }
+
+      // 只有不可用的是当前会话，才禁止继续向它发送。
+      // 打开 B 失败，不能连原本可用的 A 也一起禁用。
+      if (
+        error instanceof ApiError &&
+        error.status === 404 &&
+        targetId === conversationId
+      ) {
+        setConversationUnavailable(true);
+      }
+
+      // 不清空 messages，不修改 conversationId，不自动重试。
+      setFeedback({
+        tone: "error",
+        text:
+          `读取会话 #${targetId} 失败：` +
+          getErrorMessage(error, "请稍后重试。") +
+          " 当前显示的对话已保留。",
+      });
+    } finally {
+      requestInFlight.current = false;
+
+      if (mounted.current) {
+        setRequestStatus("idle");
+      }
+    }
+  }
 
   async function handleSend(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -115,20 +260,24 @@ export function AssistantPanel({
       setConversationId(result.conversationId);
       setPendingAction(result.pendingAction);
 
-      // 函数式更新根据最新的 messages 追加内容，
-      // 不直接修改旧数组。
+      // 在事件处理流程中分配编号。
+      // 不在渲染或 state 更新函数内部增加计数。
+      const localTurnId = nextLocalTurnId.current;
+      nextLocalTurnId.current += 1;
+
+      // history- 与 local- 前缀不同，不会发生编号碰撞。
       //
-      // 本步骤只在拿到有效回复后追加这一轮对话。
-      // 这些 ID 只用于本页列表，不是数据库 Message 的 ID。
+      // 更新函数只根据 previous 返回新数组，
+      // 不修改旧数组，也不增加计数器。
       setMessages((previous) => [
         ...previous,
         {
-          id: previous.length + 1,
+          id: `local-${localTurnId}-user`,
           role: "user",
           content: submittedMessage,
         },
         {
-          id: previous.length + 2,
+          id: `local-${localTurnId}-assistant`,
           role: "assistant",
           content: result.reply,
         },
@@ -152,7 +301,7 @@ export function AssistantPanel({
         setConversationUnavailable(true);
         setFeedback({
           tone: "error",
-          text: "当前会话不可用，请点击“新会话”后继续。",
+          text: "当前会话不可用，输入已保留。请先处理草稿，再选择其他会话或新建会话。",
         });
         return;
       }
@@ -253,7 +402,8 @@ export function AssistantPanel({
   }
 
   function handleNewConversation(): void {
-    if (requestInFlight.current || pendingAction !== null) {
+    // 与打开历史会话使用相同的切换条件。
+    if (requestInFlight.current || !canSwitchConversation) {
       return;
     }
 
@@ -288,7 +438,7 @@ export function AssistantPanel({
         <button
           type="button"
           className="secondary-button"
-          disabled={busy || pendingAction !== null}
+          disabled={!canSwitchConversation}
           onClick={handleNewConversation}
         >
           新会话
@@ -298,9 +448,94 @@ export function AssistantPanel({
       <p className="assistant-help">
         可以查询、创建和修改任务。删除任务需要点击下方确认按钮。
       </p>
+      <section
+        className="assistant-history"
+        aria-labelledby="assistant-history-title"
+      >
+        <div className="assistant-history-heading">
+          <h3 id="assistant-history-title">我的会话</h3>
+
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || pendingAction !== null}
+            onClick={() => {
+              // 箭头函数确保只在点击时调用，
+              // 不在渲染时发送请求。
+              //
+              // void 表示这里不使用 Promise 返回值；
+              // 请求错误已经在函数内部处理。
+              void handleLoadConversations();
+            }}
+          >
+            {requestStatus === "loading-conversations"
+              ? "读取中……"
+              : "刷新会话列表"}
+          </button>
+        </div>
+
+        <p className="assistant-help">
+          按创建时间倒序排列。新会话发送第一条消息后，可刷新列表查看。
+        </p>
+
+        {!hasLoadedConversations && (
+          <p className="assistant-help">点击“刷新会话列表”读取你的历史会话。</p>
+        )}
+
+        {hasLoadedConversations && conversations.length === 0 && (
+          <p className="assistant-help">当前账号还没有历史会话。</p>
+        )}
+
+        {hasLoadedConversations && conversations.length > 0 && (
+          <ul className="assistant-history-list">
+            {conversations.map((conversation) => (
+              // 使用数据库中的会话 ID 标识列表项，
+              // 不使用数组下标。
+              <li key={conversation.id}>
+                <strong>会话 #{conversation.id}</strong>
+
+                {/* 原样显示时间，后续再统一处理时区显示。 */}
+                <p className="assistant-history-time">
+                  创建时间：{formatDateTime(conversation.createdAt)}
+                </p>
+
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!canSwitchConversation}
+                  aria-label={`打开会话 #${conversation.id}`}
+                  onClick={() => {
+                    void handleSelectConversation(conversation.id);
+                  }}
+                >
+                  {conversationId === conversation.id
+                    ? "重新加载当前会话"
+                    : "打开会话"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <p className="assistant-help">
+        打开会话时读取最近 50 条可见消息。
+        历史文字不代表任务或操作的当前状态，也不会恢复删除确认卡片。
+      </p>
+
+      {hasDraft && (
+        <p className="assistant-help">
+          输入框有未发送草稿，请先处理草稿，再切换或新建会话。
+          不想发送时，可以自行保存后清空。
+        </p>
+      )}
 
       {messages.length === 0 ? (
-        <p className="assistant-empty">例如：查询我的高优先级任务。</p>
+        <p className="assistant-empty">
+          {conversationId === null
+            ? "例如：查询我的高优先级任务。"
+            : "这个会话没有可显示的历史消息，可以继续发送。"}
+        </p>
       ) : (
         <ol className="assistant-messages" role="log" aria-label="本页对话">
           {messages.map((message) => (
@@ -334,7 +569,7 @@ export function AssistantPanel({
 
           <p>
             有效期至：
-            {formatExpiry(pendingAction.expiresAt)}
+            {formatDateTime(pendingAction.expiresAt)}
           </p>
 
           <p>确认后将删除此任务。请先确认或取消，再继续对话。</p>
@@ -380,9 +615,13 @@ export function AssistantPanel({
 
       {busy && (
         <p className="assistant-loading" role="status">
-          {requestStatus === "sending"
-            ? "正在等待 AI 回复……"
-            : "正在处理操作……"}
+          {requestStatus === "loading-history"
+            ? "正在读取历史消息，当前会话尚未切换……"
+            : requestStatus === "loading-conversations"
+              ? "正在读取会话列表……"
+              : requestStatus === "sending"
+                ? "正在等待 AI 回复……"
+                : "正在处理操作……"}
         </p>
       )}
 
@@ -394,7 +633,7 @@ export function AssistantPanel({
           name="message"
           rows={4}
           value={draft}
-          disabled={busy || pendingAction !== null || conversationUnavailable}
+          disabled={busy || pendingAction !== null}
           aria-describedby="assistant-message-length"
           onChange={(event) => {
             setDraft(event.target.value);

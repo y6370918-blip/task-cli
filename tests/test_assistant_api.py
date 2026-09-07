@@ -527,3 +527,106 @@ def test_assistant_returns_structured_pending_action(
     db_session.refresh(action)
     assert action.status == "pending"
     assert db_session.get(Task, task.id) is not None
+
+
+def test_conversation_messages_return_empty_history(
+    authenticated_client: TestClient,
+    db_session: Session,
+    user: User,
+) -> None:
+    # 会话存在且属于当前用户，但还没有消息。
+    # 这种情况应返回 200 和空数组，而不是 404。
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+
+    response = authenticated_client.get(
+        f"/assistant/conversations/{conversation.id}/messages"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_conversation_messages_return_latest_50_visible_in_order(
+    authenticated_client: TestClient,
+    db_session: Session,
+    user: User,
+) -> None:
+    conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+    visible_message_ids: list[int] = []
+
+    # range(55) 产生 0 到 54，共 55 个编号。
+    # 超过 50 条，才能验证旧消息确实被裁掉。
+    for index in range(55):
+        message = create_message(
+            session=db_session,
+            conversation_id=conversation.id,
+            owner_id=user.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=f"可见消息 {index}",
+        )
+        visible_message_ids.append(message.id)
+
+    # 故意把内部协议消息放在最新位置。
+    # 如果先取最近 50 条原始记录再过滤，可见消息就会不足 50 条。
+    create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="assistant",
+        content=None,
+        tool_calls=[
+            {
+                "id": "call-history-limit",
+                "type": "function",
+                "function": {
+                    "name": "list_tasks",
+                    "arguments": "{}",
+                },
+            }
+        ],
+    )
+    create_message(
+        session=db_session,
+        conversation_id=conversation.id,
+        owner_id=user.id,
+        role="tool",
+        content='{"success": true}',
+        tool_call_id="call-history-limit",
+    )
+
+    # 即使属于同一个用户，其他会话的消息也不能混进来。
+    other_conversation = create_conversation(
+        session=db_session,
+        owner_id=user.id,
+    )
+    create_message(
+        session=db_session,
+        conversation_id=other_conversation.id,
+        owner_id=user.id,
+        role="user",
+        content="另一个会话的消息",
+    )
+
+    response = authenticated_client.get(
+        f"/assistant/conversations/{conversation.id}/messages"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data) == 50
+
+    # [-50:] 取列表最后 50 项，并保留这些项原来的顺序。
+    # 比较真实生成的 ID，不假设数据库一定从某个编号开始。
+    assert [message["id"] for message in data] == visible_message_ids[-50:]
+
+    # 保留编号 5 到 54 的消息，并按从旧到新的顺序返回。
+    assert [message["content"] for message in data] == [
+        f"可见消息 {index}" for index in range(5, 55)
+    ]

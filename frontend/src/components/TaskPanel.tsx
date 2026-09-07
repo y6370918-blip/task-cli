@@ -13,6 +13,7 @@ import {
   updateTask,
 } from "../api/tasks";
 import { TaskForm } from "./TaskForm";
+import { formatDateTime } from "../utils/datetime";
 
 type LoadStatus = "idle" | "loading" | "success" | "error";
 
@@ -78,19 +79,6 @@ function readPriorityFilter(value: string): TaskPriority | "" {
   }
 
   return "";
-}
-
-function formatDateTime(value: string | null): string {
-  if (value === null) {
-    return "未设置";
-  }
-
-  // tasks.ts 已验证这是可以解析的时间字符串。
-  // 浏览器在这里按用户本机区域显示。
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

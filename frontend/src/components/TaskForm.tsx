@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 
+import { getBrowserTimeZone } from "../utils/datetime";
 import {
   type TaskCreateInput,
   type TaskItem,
@@ -92,7 +93,17 @@ function readTaskStatus(value: string): TaskStatus | null {
 
 export function TaskForm(props: TaskFormProps) {
   const initialTask = props.mode === "edit" ? props.task : null;
+  // 原始响应字符串可能包含时区和小数秒。
+  // 保留它，不急着转换。
+  // initialTask 不存在时，使用 null。
+  const originalDueAt = initialTask?.dueAt ?? null;
 
+  // 这是原时间在输入框中的显示值。
+  // 当前转换函数只保留到秒，所以它与原始字符串用途不同。
+  const initialDueAtLocal = toDateTimeLocal(originalDueAt);
+
+  // 用于显示表单提示，不修改浏览器或服务器的时区。
+  const localTimeZone = getBrowserTimeZone();
   // 父组件之后会使用 key 控制表单重新挂载。
   // 因此这里不需要用 useEffect 同步 initialTask。
   const [title, setTitle] = useState(() => initialTask?.title ?? "");
@@ -109,9 +120,9 @@ export function TaskForm(props: TaskFormProps) {
     () => initialTask?.status ?? "pending",
   );
 
-  const [dueAtLocal, setDueAtLocal] = useState(() =>
-    toDateTimeLocal(initialTask?.dueAt ?? null),
-  );
+  // state 保存用户当前正在编辑的值。
+  // initialDueAtLocal 是初始显示值；dueAtLocal 会随输入变化。
+  const [dueAtLocal, setDueAtLocal] = useState(initialDueAtLocal);
 
   const [validationMessage, setValidationMessage] = useState("");
 
@@ -137,7 +148,23 @@ export function TaskForm(props: TaskFormProps) {
     let dueAt: string | null;
 
     try {
-      dueAt = toAwareDateTime(dueAtLocal);
+      if (props.mode === "edit" && dueAtLocal === initialDueAtLocal) {
+        // 编辑模式，而且截止时间与初始显示值相同。
+        //
+        // 直接使用原始响应字符串，
+        // 避免只改标题，却把原来的小数秒丢掉。
+        //
+        // 注意：后面仍然发送 due_at 字段，
+        // 只是值保持原样，并不是省略这个字段。
+        dueAt = originalDueAt;
+      } else {
+        // 创建任务，或用户改变了截止时间：
+        // 按现有规则把本地输入转换成 UTC。
+        //
+        // 用户清空输入时，现有函数返回 null，
+        // 表示清除截止时间。
+        dueAt = toAwareDateTime(dueAtLocal);
+      }
     } catch (error: unknown) {
       setValidationMessage(
         error instanceof Error ? error.message : "截止时间格式不合法。",
@@ -266,15 +293,19 @@ export function TaskForm(props: TaskFormProps) {
         step="1"
         value={dueAtLocal}
         disabled={props.submitting}
+        // 把输入框与下面的说明关联起来，
+        // 便于屏幕阅读器读取提示，不影响提交内容。
+        aria-describedby={`${idPrefix}-due-at-help`}
         onChange={(event) => {
           setDueAtLocal(event.target.value);
         }}
       />
 
-      <p className="task-editor-help">
+      <p id={`${idPrefix}-due-at-help`} className="task-editor-help">
+        请按当前浏览器时区（{localTimeZone}）输入。
         留空表示没有截止时间；编辑时清空会删除原截止时间。
+        未修改截止时间时，会保留原值。
       </p>
-
       {validationMessage !== "" && (
         <p className="task-editor-error" role="alert">
           {validationMessage}

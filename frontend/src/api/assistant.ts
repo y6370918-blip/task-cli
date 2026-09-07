@@ -218,3 +218,124 @@ export async function cancelAssistantAction(
 ): Promise<AssistantActionResult> {
   return submitActionDecision(accessToken, actionId, "cancel");
 }
+
+export type ConversationItem = {
+  id: number;
+
+  // JSON 中的时间是字符串，不是 JavaScript Date 对象。
+  createdAt: string;
+};
+
+export type ConversationMessageItem = {
+  id: number;
+
+  // 对应历史展示接口，不接收 system 或 tool 消息。
+  role: "user" | "assistant";
+
+  content: string;
+  createdAt: string;
+};
+
+function isConversationDateTime(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  // 当前会话 Schema 使用 datetime，而不是 AwareDatetime。
+  // 允许带时区或不带时区的 ISO 日期时间。
+  // 保留原文，不擅自补时区。
+  //
+  // 这里做基本格式和可解析性检查，不转换存储值。
+  const pattern =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+
+  return pattern.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+function parseConversation(data: unknown): ConversationItem {
+  if (
+    !isRecord(data) ||
+    !isPositiveId(data.id) ||
+    !isConversationDateTime(data.created_at)
+  ) {
+    throw new ApiError("会话列表中的数据格式不符合预期。");
+  }
+
+  // 只提取需要的字段，统一前端的 camelCase 命名。
+  return {
+    id: data.id,
+    createdAt: data.created_at,
+  };
+}
+
+function parseConversationMessage(data: unknown): ConversationMessageItem {
+  if (
+    !isRecord(data) ||
+    !isPositiveId(data.id) ||
+    (data.role !== "user" && data.role !== "assistant") ||
+    typeof data.content !== "string" ||
+    !isConversationDateTime(data.created_at)
+  ) {
+    throw new ApiError("历史消息的数据格式不符合预期。");
+  }
+
+  // 历史文字仅用于展示，不从 content 中提取操作编号。
+  return {
+    id: data.id,
+    role: data.role,
+    content: data.content,
+    createdAt: data.created_at,
+  };
+}
+
+export async function listAssistantConversations(
+  accessToken: string,
+): Promise<ConversationItem[]> {
+  // 用户身份由 JWT 确定，不传 owner_id。
+  const data = await apiRequest<unknown>("/assistant/conversations", {
+    method: "GET",
+    headers: {
+      Authorization: getAuthorization(accessToken),
+    },
+  });
+
+  if (!Array.isArray(data)) {
+    throw new ApiError("会话列表响应不是数组。");
+  }
+
+  // 外层是数组还不够，每一项都必须通过校验。
+  // 保留后端按创建时间倒序排列的结果。
+  return data.map((item: unknown) => parseConversation(item));
+}
+
+export async function getAssistantConversationMessages(
+  accessToken: string,
+  conversationId: number,
+): Promise<ConversationMessageItem[]> {
+  if (!isPositiveId(conversationId)) {
+    throw new ApiError("会话 ID 不合法。");
+  }
+
+  // 前端检查编号格式。
+  // 后端仍要检查会话是否属于当前用户。
+  const data = await apiRequest<unknown>(
+    `/assistant/conversations/${conversationId}/messages`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: getAuthorization(accessToken),
+      },
+    },
+  );
+
+  if (!Array.isArray(data)) {
+    throw new ApiError("历史消息响应不是数组。");
+  }
+
+  // 后端已经选取最近 50 条可见消息，
+  // 并按消息 ID 升序返回，不在前端再次倒序。
+  //
+  // 不捕获并吞掉 401、404 等错误，
+  // 留给组件决定清除登录状态还是显示错误。
+  return data.map((item: unknown) => parseConversationMessage(item));
+}

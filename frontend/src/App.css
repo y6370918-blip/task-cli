@@ -958,3 +958,51 @@
     width: 100%;
   }
 }
+
+/* Day57：会话列表。 */
+.assistant-history {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.assistant-history-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.assistant-history-heading h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.assistant-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+
+  /* 限制显示区域高度，不代表后端已经实现分页。 */
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.assistant-history-list li {
+  min-width: 0;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.assistant-panel .assistant-history-time {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
