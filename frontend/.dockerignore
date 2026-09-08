@@ -1,0 +1,23 @@
+# 不把 Windows 本地安装的依赖带入 Linux 构建环境。
+node_modules
+
+# 镜像内重新构建，不使用本地旧产物。
+dist
+dist-ssr
+
+# 不发送真实环境文件。
+# 前端构建所需的公开 API 前缀通过 ARG 提供。
+.env
+.env.*
+*.local
+
+# 排除测试报告和缓存，但不排除测试源码。
+coverage
+.vitest
+*.tsbuildinfo
+
+# 排除日志和编辑器目录。
+*.log
+.vscode
+.idea
+.git

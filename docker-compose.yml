@@ -63,5 +63,42 @@ services:
       retries: 5
       start_period: 10s
 
+  frontend:
+    build:
+      # 使用前端目录作为构建上下文。
+      # 因此读取 frontend/Dockerfile 和 frontend/.dockerignore。
+      context: ./frontend
+
+      args:
+        # 提供给 Dockerfile 中的 ARG。
+        # 这是公开的请求前缀，不是密钥。
+        VITE_API_BASE_URL: /api
+
+    ports:
+      # 宿主机地址 : 宿主机端口 : 容器端口。
+      # 仅绑定本机，不主动向局域网或公网开放前端。
+      - "127.0.0.1:8080:8080"
+
+    depends_on:
+      api:
+        # 等后端健康检查通过，再启动前端。
+        # 只控制启动顺序，不保证后端以后永远可用。
+        condition: service_healthy
+
+    healthcheck:
+      # 只检查 Nginx 能否提供页面入口。
+      # 后端是否就绪，另外通过 /api/health/ready 验证。
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/index.html
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   postgres_data:

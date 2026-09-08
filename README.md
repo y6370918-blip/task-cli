@@ -306,11 +306,39 @@ http://127.0.0.1:8000/openapi.json
 
 ## Docker Compose
 
-同时构建并启动 PostgreSQL 和 API：
+确认根目录 .env 已配置，并审核待应用迁移后，构建并启动 PostgreSQL、API 和前端。API 启动时会自动执行 alembic upgrade head；已有数据的环境应先备份。
 
 ```powershell
 docker compose up -d --build
 ```
+
+### 前端入口
+
+启动后访问 http://localhost:8080/，不需要运行 Vite 开发服务器。
+
+- Node 构建阶段生成 `dist`。
+- 非 root Nginx 提供静态文件。
+- 浏览器请求 `/api/...`，Nginx 去掉 `/api/` 前缀后转发到 `api:8000`。
+- `VITE_API_BASE_URL=/api` 在构建时写入前端产物，不是 Nginx 运行时配置。
+- 前端端口仅绑定 `127.0.0.1:8080`。现有 API 和数据库端口仍发布到宿主机，因此此配置不能直接视为完成公网安全加固。
+
+通过前端入口检查后端就绪状态：
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/health/ready
+```
+
+前端容器健康仅表示页面入口可用，不代表 API 和数据库始终正常。
+
+### 修改代码后更新容器
+
+`docker compose start` 只启动已有容器，不会把修改后的源码装入容器。
+
+更新 API 前先构建镜像，审核迁移，再重新创建 API 容器。API 容器地址可能变化，重建后应重启前端 Nginx，让它重新解析服务地址。
+
+数据库迁移 head 一致，只说明迁移版本一致，不代表运行中的应用代码已经最新。
+
+不要为了更新应用执行 `docker compose down -v`。
 
 查看容器状态：
 
@@ -732,8 +760,8 @@ docs/operations.md
 
 ## Known Limitations
 
-- 当前没有前端界面，主要通过 Swagger UI 或 API Client 使用。
-- Assistant 返回的待确认操作 ID 位于自然语言 `reply` 中，没有独立结构化字段。
+- 已有 React 前端；任务列表目前最多查询 100 条，尚无分页控件。
+- 当前 Assistant 响应包含结构化 pending_action；历史消息接口不恢复待确认操作卡片。
 - 项目没有用户时区和可靠的相对时间解析，不能保证正确处理“明天下午三点”。
 - AI 删除任务需要确认，但 REST `DELETE` 当前仍然立即删除。
 - 会话上下文采用消息数和 UTF-8 字节估算预算，不是 DeepSeek 官方精确 Tokenizer。
@@ -743,7 +771,7 @@ docs/operations.md
 - Docker Compose 启动时自动迁移，只适合当前单实例。
 - Python 依赖尚未使用完整 lock file 固定所有传递依赖。
 - 当前没有公网托管平台、域名和 TLS。
-- Git remote 尚未配置，因此远程 GitHub Actions 和 GitHub Release 尚未验证。
+- 已配置 Git remote；发布验收应查看对应提交的远程 CI 结果，本地测试通过不能替代远程验证。
 
 ## Roadmap
 
@@ -751,23 +779,23 @@ docs/operations.md
 
 ### Near-term
 
-- 返回结构化的 Assistant Action 信息；
 - 增加用户时区和受控的相对日期解析；
 - 为 API 增加适度限流；
-- 配置真实远程仓库并验证 CI；
+- 持续验证远程 CI”；
 - 选择托管平台完成公网部署。
 
 ### Frontend Phase
 
-下一阶段将在当前仓库中增加独立的 `frontend/`：
+当前已在 `frontend/` 实现 React + TypeScript 前端，包括：
 
-- TypeScript 和 React/Next.js；
-- 类型安全的 API Client；
-- 注册、登录和认证状态；
-- 任务列表、过滤、排序和分页；
-- 创建、更新和删除确认；
-- AI Assistant 会话界面；
-- 前后端测试和部署。
+- API Client 与运行时响应校验；
+- 注册、登录和内存中的认证状态；
+- 任务列表、状态与优先级筛选；
+- 创建、编辑和删除交互；
+- AI Assistant、删除确认卡片与会话历史；
+- 时间显示、前端自动化测试和 Nginx 容器入口。
+
+后续仍可完善分页、更多筛选与交互测试；公网部署另行决定。
 
 ### Future AI Project
 
